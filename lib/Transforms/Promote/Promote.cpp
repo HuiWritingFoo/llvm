@@ -44,12 +44,11 @@ typedef std::map <Function *, Function *> FunctionMap;
    MD nodes referencing each HCC kernel is stored. */
 static Twine KernelListMDNodeName = "hcc.kernels";
 
-enum {
-        PrivateAddressSpace = 0,
-        GlobalAddressSpace = 1,
-        ConstantAddressSpace = 2,
-        LocalAddressSpace = 3
-};
+const unsigned PrivateAddressSpace = 0; // AMDGPUAS::PRIVATE_ADDRESS
+const unsigned GlobalAddressSpace = 1;  // AMDGPUAS::GLOBAL_ADDRESS
+unsigned ConstantAddressSpace = 2;      // 4 if using NVPTX triple
+                                        // AMDGPUAS::CONSTANT_ADDRESS by default
+const unsigned LocalAddressSpace = 3;   // AMDGPUAS::LOCAL_ADDRESS
 
 class InstUpdateWorkList;
 
@@ -1615,9 +1614,6 @@ Function * createPromotedFunctionToType ( Function * F, FunctionType * promoteTy
           std::string newFuncName;
           Function *promotedFunction;
           switch (Addrspace) {
-            case PrivateAddressSpace:
-            case ConstantAddressSpace:
-              break;
             case LocalAddressSpace:
               newFuncName = F->getName().str() + "_local";
               DEBUG(llvm::errs() << newFuncName << "\n";);
@@ -1918,6 +1914,9 @@ void PromoteGlobals::getAnalysisUsage(AnalysisUsage& AU) const
 
 bool PromoteGlobals::runOnModule(Module& M)
 {
+        if (M.getTargetTriple().find("nvptx") != std::string::npos)
+          ConstantAddressSpace = 4;
+
         FunctionVect foundKernels;
         FunctionMap promotedKernels;
         if (!findKernels(M, foundKernels)) return false;
