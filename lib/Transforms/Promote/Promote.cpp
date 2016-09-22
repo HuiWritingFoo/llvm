@@ -30,7 +30,6 @@
 #include <map>
 #include <set>
 using namespace llvm;
-#define TILE_STATIC_NAME "clamp_opencl_local"
 
 namespace {
 
@@ -64,7 +63,7 @@ void updateInstructionWithNewOperand(Instruction * I,
                                      Value * newOperand,
                                      InstUpdateWorkList * updatesNeeded);
 
-void updateListWithUsers ( Value::user_iterator U, const Value::user_iterator& Ue, 
+void updateListWithUsers ( Value::user_iterator U, const Value::user_iterator& Ue,
                            Value * oldOperand, Value * newOperand,
                            InstUpdateWorkList * updates );
 /* This structure hold information on which instruction
@@ -1298,8 +1297,9 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
     Module::GlobalListType &globals = M->getGlobalList();
     for (Module::global_iterator I = globals.begin(), E = globals.end();
         I != E; I++) {
+
         unsigned the_space = LocalAddressSpace;
-        if (!I->hasSection() && I->isConstant() && 
+        if (I->isConstant() &&
             I->getType()->getPointerAddressSpace() == 0 &&
             I->hasName() && I->getLinkage() == GlobalVariable::InternalLinkage) {
             // Though I'm global, I'm constant indeed.
@@ -1307,7 +1307,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
             the_space = ConstantAddressSpace;
           else
             continue;
-        } else if (!I->hasSection() && I->isConstant() && 
+        } else if (I->isConstant() &&
             I->getType()->getPointerAddressSpace() == 0 &&
             I->hasName() && I->getLinkage() == GlobalVariable::PrivateLinkage) {
             // Though I'm private, I'm constant indeed.
@@ -1317,10 +1317,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
               the_space = ConstantAddressSpace;
             else
               continue;
-               
-        } else if (!I->hasSection() ||
-            I->getSection() != std::string(TILE_STATIC_NAME) ||
-            !I->hasName()) {
+        } else if (!I->hasName()) {
             // promote to global address space if the variable is used in a kernel
             // and does not come with predefined address space
             if (usedInTheFunc(I.operator->(), Func) && I->getType()->getPointerAddressSpace() == 0) {
@@ -1328,6 +1325,11 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
             } else {
               continue;
             }
+        } else if (I->getType()->getPointerAddressSpace() == 3) {
+          if (usedInTheFunc(I.operator->(), Func))
+            the_space = LocalAddressSpace;
+          else
+            continue;
         }
 
         // If the address of this global variable is available from host, it
@@ -1368,7 +1370,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
 
             // tile static variables cannot have an initializer
             llvm::Constant *Init = nullptr;
-            if (I->hasSection() && (I->getSection() == std::string(TILE_STATIC_NAME))) {
+            if (I->getType()->getPointerAddressSpace() == 3) {
                 Init = llvm::UndefValue::get(I->getType()->getElementType());
             } else {
                 Init = I->hasInitializer() ? I->getInitializer() : 0;
@@ -1398,27 +1400,6 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
                 usesOfSameFunction.second; U != Ue; U++)
                 updateListWithUsers (U->second, I.operator->(), new_GV, updateNeeded);
         }
-    }
-}
-
-void eraseOldTileStaticDefs(Module *M)
-{
-    std::vector<GlobalValue*> todo;
-    Module::GlobalListType &globals = M->getGlobalList();
-    for (Module::global_iterator I = globals.begin(), E = globals.end();
-        I != E; I++) {
-        if (!I->hasSection() ||
-            I->getSection() != std::string(TILE_STATIC_NAME) ||
-            I->getType()->getPointerAddressSpace() != 0) {
-            continue;
-        }
-        I->removeDeadConstantUsers();
-        if (I->getNumUses() == 0)
-            todo.push_back(I.operator->());
-    }
-    for (std::vector<GlobalValue*>::iterator I = todo.begin(),
-            E = todo.end(); I!=E; I++) {
-        (*I)->eraseFromParent();
     }
 }
 
@@ -1656,8 +1637,6 @@ Function * createPromotedFunctionToType ( Function * F, FunctionType * promoteTy
                 workList.run();
                 CollectChangedCalledFunctions ( newFunction, &workList );
         } while ( !workList.empty() );
-
-        eraseOldTileStaticDefs(F->getParent());
 
         // don't verify the new function if it is only a declaration
         if (!newFunction->isDeclaration() && verifyFunction (*newFunction/*, PrintMessageAction*/)) {
@@ -1939,10 +1918,7 @@ bool PromoteGlobals::runOnModule(Module& M)
         Module::GlobalListType &globals = M.getGlobalList();
         for (Module::global_iterator I = globals.begin(), E = globals.end();
                 I != E; I++) {
-            if (I->hasSection() &&
-                    I->getSection() == std::string(TILE_STATIC_NAME) &&
-                    I->getType()->getPointerAddressSpace() != 0) {
-
+            if (I->getType()->getPointerAddressSpace() == 3) {
                 std::string oldName = I->getName().str();
                 // Prepend the name of the function which contains the user
                 std::set<std::string> userNames;
@@ -1955,7 +1931,7 @@ bool PromoteGlobals::runOnModule(Module& M)
                 }
                 // A local memory variable belongs to only one kernel, per SPIR spec
                 assert(userNames.size() < 2 &&
-                        "__local variable belongs to more than one kernel");
+                        "tile_static variable belongs to more than one kernel");
                 if (userNames.empty())
                     continue;
                 oldName = *(userNames.begin()) + "."+oldName;
@@ -1967,7 +1943,6 @@ bool PromoteGlobals::runOnModule(Module& M)
         }
         return false;
 }
-
 
 char PromoteGlobals::ID = 0;
 #if 1
