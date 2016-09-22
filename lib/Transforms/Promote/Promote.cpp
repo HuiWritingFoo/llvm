@@ -47,7 +47,8 @@ enum {
         PrivateAddressSpace = 0,
         GlobalAddressSpace = 1,
         ConstantAddressSpace = 2,
-        LocalAddressSpace = 3
+        LocalAddressSpace = 3,
+        FlatAddressSpace = 4
 };
 
 class InstUpdateWorkList;
@@ -457,7 +458,7 @@ StructType* mapTypeToGlobal(StructType* T) {
     if (PointerType* PT = dyn_cast<PointerType>(baseType)) {
       if (StructType* pointedStructType = dyn_cast<StructType>(PT->getElementType())) {
         if (structTypeMap.find(pointedStructType) != structTypeMap.end()) {
-          translatedType = PointerType::get(structTypeMap[pointedStructType], GlobalAddressSpace);
+          translatedType = PointerType::get(structTypeMap[pointedStructType], FlatAddressSpace);
         }
       }
     }
@@ -488,7 +489,7 @@ ArrayType * mapTypeToGlobal ( ArrayType * T )
 PointerType * mapTypeToGlobal ( PointerType * PT )
 {
         Type * translatedType = mapTypeToGlobal ( PT->getElementType());
-        return PointerType::get ( translatedType, GlobalAddressSpace );
+        return PointerType::get ( translatedType, FlatAddressSpace );
 }
 
 SequentialType * mapTypeToGlobal ( SequentialType * T ) {
@@ -1321,7 +1322,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
             // promote to global address space if the variable is used in a kernel
             // and does not come with predefined address space
             if (usedInTheFunc(I.operator->(), Func) && I->getType()->getPointerAddressSpace() == 0) {
-              the_space = GlobalAddressSpace;
+              the_space = FlatAddressSpace;
             } else {
               continue;
             }
@@ -1335,7 +1336,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
         // If the address of this global variable is available from host, it
         // must stay in global address space.
         if (isAddressCopiedToHost(*I, *Func))
-            the_space = GlobalAddressSpace;
+            the_space = FlatAddressSpace;
         DEBUG(llvm::errs() << "Promoting variable: " << *I << "\n";
                 errs() << "  to addrspace(" << the_space << ")\n";);
 
@@ -1582,17 +1583,18 @@ Function * createPromotedFunctionToType ( Function * F, FunctionType * promoteTy
               newFuncName = F->getName().str() + "_local";
               DEBUG(llvm::errs() << newFuncName << "\n";);
               promotedFunction = F->getParent()->getFunction(newFuncName);
-              if (!promotedFunction) { 
+              if (!promotedFunction) {
                 newFunction->setName(F->getName() + "_local");
               } else {
                 newFunction = promotedFunction;
               }
               break;
             case GlobalAddressSpace:
+            case FlatAddressSpace:
               newFuncName = F->getName().str() + "_global";
               DEBUG(llvm::errs() << newFuncName << "\n";);
               promotedFunction = F->getParent()->getFunction(newFuncName);
-              if (!promotedFunction) { 
+              if (!promotedFunction) {
                 newFunction->setName(F->getName() + "_global");
               } else {
                 newFunction = promotedFunction;
