@@ -161,7 +161,7 @@ bool EraseNonkernels::runOnModule(Module &M)
 	for (Module::iterator I = global_funcs.begin(), E = global_funcs.end(); I != E; ) {
 		// keep functions with AMDGPU_KERNEL linkage
 		if (I->getCallingConv() == CallingConv::AMDGPU_KERNEL ||
-                    I-getCallingConv() == Calingconv::PTX_Kerenel) {
+                    I->getCallingConv() == CallingConv::PTX_Kernel) {
 			I++;
 			continue;
 		}
