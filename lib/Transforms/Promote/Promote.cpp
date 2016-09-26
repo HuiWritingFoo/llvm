@@ -1929,8 +1929,11 @@ bool PromoteGlobals::runOnModule(Module& M)
                 Function * promoted = createPromotedFunction (*F);
                 promoted->takeName (*F);
                 promoted->setName(promoted->getName().str());
-
-                promoted->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+                if (M.getTargetTriple().find("nvptx") != std::string::npos) {
+                  promoted->setCallingConv(llvm::CallingConv::PTX_Kernel);
+                } else {
+                  promoted->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+                }
                 // lambdas can be set as internal. This causes problem
                 // in optimizer and we shall mark it as non-internal
                 if (promoted->getLinkage() ==
