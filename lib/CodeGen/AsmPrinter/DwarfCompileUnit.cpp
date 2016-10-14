@@ -419,7 +419,7 @@ DIE *DwarfCompileUnit::constructInlinedScopeDIE(LexicalScope *Scope) {
   addUInt(*ScopeDIE, dwarf::DW_AT_call_file, None,
           getOrCreateSourceID(IA->getFilename(), IA->getDirectory()));
   addUInt(*ScopeDIE, dwarf::DW_AT_call_line, None, IA->getLine());
-  if (IA->getDiscriminator())
+  if (IA->getDiscriminator() && DD->getDwarfVersion() >= 4)
     addUInt(*ScopeDIE, dwarf::DW_AT_GNU_discriminator, None,
             IA->getDiscriminator());
 
@@ -514,13 +514,15 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
   for (auto FI : DV.getFrameIndex()) {
     unsigned FrameReg = 0;
     const TargetFrameLowering *TFI = Asm->MF->getSubtarget().getFrameLowering();
-    int Offset = TFI->getFrameIndexReference(*Asm->MF, FI, FrameReg);
     assert(Expr != DV.getExpression().end() && "Wrong number of expressions");
-    if (TFI->useXderef()) {
-      DwarfExpr.EmitOp(dwarf::DW_OP_fbreg);
-      DwarfExpr.EmitSigned(TFI->getOffset(*Asm->MF, FI));
-      DwarfExpr.EmitOp(dwarf::DW_OP_deref);
+    if (TFI->targetUsesAddressSpace()) {
+      DwarfExpr.EmitOp(dwarf::DW_OP_constu);
+      DwarfExpr.EmitSigned(DV.getVariable()->getAddressSpace());
+      DwarfExpr.EmitOp(dwarf::DW_OP_constu);
+      DwarfExpr.EmitSigned(TFI->getFrameIndexOffset(*Asm->MF, FI));
+      DwarfExpr.EmitOp(dwarf::DW_OP_xderef);
     } else {
+      int Offset = TFI->getFrameIndexReference(*Asm->MF, FI, FrameReg);
       DwarfExpr.AddMachineRegIndirect(*Asm->MF->getSubtarget().getRegisterInfo(),
                                       FrameReg, Offset);
     }

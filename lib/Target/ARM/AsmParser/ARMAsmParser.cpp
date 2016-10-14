@@ -65,8 +65,7 @@ static cl::opt<ImplicitItModeTy> ImplicitItMode(
                clEnumValN(ImplicitItModeTy::ARMOnly, "arm",
                           "Accept in ARM, reject in Thumb"),
                clEnumValN(ImplicitItModeTy::ThumbOnly, "thumb",
-                          "Warn in ARM, emit implicit ITs in Thumb"),
-               clEnumValEnd));
+                          "Warn in ARM, emit implicit ITs in Thumb")));
 
 class ARMOperand;
 
@@ -9729,7 +9728,7 @@ bool ARMAsmParser::parseDirectiveFPU(SMLoc L) {
   StringRef FPU = getParser().parseStringToEndOfStatement().trim();
 
   unsigned ID = ARM::parseFPU(FPU);
-  std::vector<const char *> Features;
+  std::vector<StringRef> Features;
   if (!ARM::getFPUFeatures(ID, Features)) {
     Error(FPUNameLoc, "Unknown FPU name");
     return false;
@@ -10409,10 +10408,10 @@ bool ARMAsmParser::parseDirectiveThumbSet(SMLoc L) {
 
 /// Force static initialization.
 extern "C" void LLVMInitializeARMAsmParser() {
-  RegisterMCAsmParser<ARMAsmParser> X(TheARMLETarget);
-  RegisterMCAsmParser<ARMAsmParser> Y(TheARMBETarget);
-  RegisterMCAsmParser<ARMAsmParser> A(TheThumbLETarget);
-  RegisterMCAsmParser<ARMAsmParser> B(TheThumbBETarget);
+  RegisterMCAsmParser<ARMAsmParser> X(getTheARMLETarget());
+  RegisterMCAsmParser<ARMAsmParser> Y(getTheARMBETarget());
+  RegisterMCAsmParser<ARMAsmParser> A(getTheThumbLETarget());
+  RegisterMCAsmParser<ARMAsmParser> B(getTheThumbBETarget());
 }
 
 #define GET_REGISTER_MATCHER

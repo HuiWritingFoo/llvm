@@ -126,22 +126,22 @@ static cl::opt<bool>
 
 extern "C" void LLVMInitializeAArch64Target() {
   // Register the target.
-  RegisterTargetMachine<AArch64leTargetMachine> X(TheAArch64leTarget);
-  RegisterTargetMachine<AArch64beTargetMachine> Y(TheAArch64beTarget);
-  RegisterTargetMachine<AArch64leTargetMachine> Z(TheARM64Target);
+  RegisterTargetMachine<AArch64leTargetMachine> X(getTheAArch64leTarget());
+  RegisterTargetMachine<AArch64beTargetMachine> Y(getTheAArch64beTarget());
+  RegisterTargetMachine<AArch64leTargetMachine> Z(getTheARM64Target());
   auto PR = PassRegistry::getPassRegistry();
   initializeGlobalISel(*PR);
   initializeAArch64A53Fix835769Pass(*PR);
   initializeAArch64A57FPLoadBalancingPass(*PR);
   initializeAArch64AddressTypePromotionPass(*PR);
   initializeAArch64AdvSIMDScalarPass(*PR);
-  initializeAArch64BranchRelaxationPass(*PR);
   initializeAArch64CollectLOHPass(*PR);
   initializeAArch64ConditionalComparesPass(*PR);
   initializeAArch64ConditionOptimizerPass(*PR);
   initializeAArch64DeadRegisterDefinitionsPass(*PR);
   initializeAArch64ExpandPseudoPass(*PR);
   initializeAArch64LoadStoreOptPass(*PR);
+  initializeAArch64VectorByElementOptPass(*PR);
   initializeAArch64PromoteConstantPass(*PR);
   initializeAArch64RedundantCopyEliminationPass(*PR);
   initializeAArch64StorePairSuppressPass(*PR);
@@ -254,7 +254,7 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
     // FIXME: At this point, we can't rely on Subtarget having RBI.
     // It's awkward to mix passing RBI and the Subtarget; should we pass
     // TII/TRI as well?
-    GISel->InstSelector.reset(new AArch64InstructionSelector(*I, *RBI));
+    GISel->InstSelector.reset(new AArch64InstructionSelector(*this, *I, *RBI));
 
     GISel->RegBankInfo.reset(RBI);
 #endif
@@ -423,6 +423,7 @@ bool AArch64PassConfig::addILPOpts() {
     addPass(&EarlyIfConverterID);
   if (EnableStPairSuppress)
     addPass(createAArch64StorePairSuppressPass());
+  addPass(createAArch64VectorByElementOptPass());
   return true;
 }
 
@@ -463,7 +464,8 @@ void AArch64PassConfig::addPreEmitPass() {
   // Relax conditional branch instructions if they're otherwise out of
   // range of their destination.
   if (BranchRelaxation)
-    addPass(createAArch64BranchRelaxation());
+    addPass(&BranchRelaxationPassID);
+
   if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH &&
       TM->getTargetTriple().isOSBinFormatMachO())
     addPass(createAArch64CollectLOHPass());

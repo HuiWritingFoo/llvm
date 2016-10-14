@@ -63,7 +63,7 @@ void updateInstructionWithNewOperand(Instruction * I,
                                      Value * newOperand,
                                      InstUpdateWorkList * updatesNeeded);
 
-void updateListWithUsers ( Value::user_iterator U, const Value::user_iterator& Ue, 
+void updateListWithUsers ( Value::user_iterator U, const Value::user_iterator& Ue,
                            Value * oldOperand, Value * newOperand,
                            InstUpdateWorkList * updates );
 /* This structure hold information on which instruction
@@ -661,7 +661,6 @@ void updateListWithUsers ( User *U, Value * oldOperand, Value * newOperand,
                 //
                 // notice that I2 can NOT be built from CE2->getAsInstruction() as it would
                 // increase user count of CE2 and CE, and would cause infinite loop
-                
                 for (Value::user_iterator CU2 = CE2->user_begin(), CUE2 = CE2->user_end(); CU2 != CUE2;) {
                     if (Instruction *I3 = dyn_cast<Instruction>(*CU2)) {
                         Insn = CE->getAsInstruction();
@@ -706,7 +705,7 @@ void updateListWithUsers ( User *U, Value * oldOperand, Value * newOperand,
         }
     }
 }
-void updateListWithUsers ( Value::user_iterator U, const Value::user_iterator& Ue, 
+void updateListWithUsers ( Value::user_iterator U, const Value::user_iterator& Ue,
                            Value * oldOperand, Value * newOperand,
                            InstUpdateWorkList * updates )
 {
@@ -770,7 +769,7 @@ void updatePHINodeWithNewOperand(PHINode * I, Value * oldOperand,
           } else if (isa<Constant>(V)) {
             Constant *CC = dyn_cast<Constant>(V);
 
-            DEBUG(llvm::errs() << "value#" << i << " update type from: ";  PTy->dump(); 
+            DEBUG(llvm::errs() << "value#" << i << " update type from: ";  PTy->dump();
             llvm::errs() << " to: "; PT->dump();
             llvm::errs() << " for constant: "; CC->dump(); llvm::errs() << "\n";);
 
@@ -827,7 +826,7 @@ void updateStoreInstWithNewOperand(StoreInst * I, Value * oldOperand, Value * ne
 
                 } else {
                   DEBUG(llvm::errs() << "ptrProducer is null\n";);
-                } 
+                }
         }
 }
 
@@ -957,6 +956,26 @@ void updateCMPWithNewOperand(CmpInst *CMP, Value *oldOperand, Value *newOperand,
       updateListWithUsers(CMP->user_begin(), CMP->user_end(), CMP, CMP, updatesNeeded);
 }
 
+void updatePtrToIntWithNewOperand(PtrToIntInst *PTI, Value *oldOperand, Value *newOperand, InstUpdateWorkList *updatesNeeded)
+{
+    DEBUG(llvm::errs() << "=== BEFORE UPDATE PtrToInt ===\n";
+    llvm::errs() << " new type: "; newOperand->getType()->dump(); llvm::errs() << "\n";
+    for (unsigned i = 0; i < PTI->getNumOperands(); ++i) {
+      llvm::errs() << " op#" << i << ": "; PTI->getOperand(i)->getType()->dump(); llvm::errs() << "\n";
+    });
+
+    bool update = false;
+    Value *V = PTI->getPointerOperand();
+    Type *T = V->getType();
+    if (T != newOperand->getType()) {
+      V->mutateType(newOperand->getType());
+      updateListWithUsers(V->user_begin(), V->user_end(), V, V, updatesNeeded);
+      update = true;
+    }
+    if (update)
+      updateListWithUsers(PTI->user_begin(), PTI->user_end(), PTI, PTI, updatesNeeded);
+}
+
 void updateSELWithNewOperand(SelectInst * SEL, Value * oldOperand, Value * newOperand, InstUpdateWorkList * updatesNeeded)
 {
     DEBUG(llvm::errs() << "=== BEFORE UPDATE SEL ===\n";
@@ -980,7 +999,7 @@ void updateSELWithNewOperand(SelectInst * SEL, Value * oldOperand, Value * newOp
         SEL->mutateType(newOperand->getType());
         update = true;
       }
-    }    
+    }
     if(SEL->getOperand(2) == oldOperand) {
       SEL->setOperand (2, newOperand);
 
@@ -1001,8 +1020,31 @@ void updateSELWithNewOperand(SelectInst * SEL, Value * oldOperand, Value * newOp
     llvm::errs() << " op1 type: "; SEL->getOperand(1)->getType()->dump(); llvm::errs() << "\n";
     llvm::errs() << " op2 type: "; SEL->getOperand(2)->getType()->dump(); llvm::errs() << "\n";);
 
-    if(update) 
+    if(update)
       updateListWithUsers(SEL->user_begin(), SEL->user_end(), SEL, SEL, updatesNeeded);
+}
+
+void updateAtomicRMWWithNewOperand(AtomicRMWInst *ARMWI, Value * oldOperand, Value * newOperand, InstUpdateWorkList * updatesNeeded)
+{
+    DEBUG(llvm::errs() << "=== BEFORE UPDATE AtomicRMW ===\n";
+    llvm::errs() << "ARMWI: "; ARMWI->dump(); llvm::errs() << "\n";
+    llvm::errs() << "ARMWI pointer operand: "; ARMWI->getPointerOperand()->dump(); llvm::errs() << "\n";
+    llvm::errs() << "ARMWI value operand: "; ARMWI->getValOperand()->dump(); llvm::errs() << "\n";
+    llvm::errs() << "oldOperand: "; oldOperand->dump(); llvm::errs() << "\n";
+    llvm::errs() << "newOperand: "; newOperand->dump(); llvm::errs() << "\n";);
+
+    bool update = false;
+
+    if (ARMWI->getPointerOperand() == oldOperand) {
+      ARMWI->setOperand(AtomicRMWInst::getPointerOperandIndex(), newOperand);
+      update = true;
+    }
+
+    DEBUG(llvm::errs() << "=== AFTER UPDATE AtomicRMW ===\n";
+    llvm::errs() << "ARMWI: "; ARMWI->dump(); llvm::errs() << "\n";);
+
+    if (update)
+      updateListWithUsers(ARMWI->user_begin(), ARMWI->user_end(), ARMWI, ARMWI, updatesNeeded);
 }
 
 bool CheckCalledFunction ( CallInst * CI, InstUpdateWorkList * updates,
@@ -1105,38 +1147,17 @@ void CollectChangedCalledFunctions (Function * F, InstUpdateWorkList * updatesNe
         }
 }
 
-// HSA-specific : memory scope for atomic operations
-//
-// For atomic instructions (load atomic, store atomic, atomicrmw, cmpxchg, fence),
-// add !mem.scope metadata to specify its memory scope, which is required in HSAIL.
-// Since there is no way to specify memory scope in C++ atomic operations <atomic>
-// yet, we set default memory scope as: _sys_ (5)
-void appendMemoryScopeMetadata(Instruction *I) {
-  // set default memory scope as: _sys_ (5)
-  ConstantInt *C = ConstantInt::get(Type::getInt32Ty(I->getContext()), 5); 
-  MDTuple *MD = MDTuple::get(I->getContext(), ConstantAsMetadata::get(C));
-  I->setMetadata("mem.scope", MD);
-}
-
 void updateInstructionWithNewOperand(Instruction * I,
                                      Value * oldOperand,
                                      Value * newOperand,
                                      InstUpdateWorkList * updatesNeeded)
 {
        if (LoadInst * LI = dyn_cast<LoadInst>(I)) {
-               if (LI->isAtomic()) {
-                 appendMemoryScopeMetadata(I);
-               }
-
                updateLoadInstWithNewOperand(LI, newOperand, updatesNeeded);
                return;
        }
 
        if (StoreInst * SI = dyn_cast<StoreInst>(I)) {
-               if (SI->isAtomic()) {
-                 appendMemoryScopeMetadata(I);
-               }
-
                updateStoreInstWithNewOperand(SI, oldOperand, newOperand, updatesNeeded);
                return;
        }
@@ -1166,7 +1187,7 @@ void updateInstructionWithNewOperand(Instruction * I,
            updatePHINodeWithNewOperand(PHI, oldOperand, newOperand, updatesNeeded);
            return;
        }
-       
+
        if (SelectInst * SEL = dyn_cast<SelectInst>(I)) {
            updateSELWithNewOperand(SEL, oldOperand, newOperand,updatesNeeded);
            return;
@@ -1177,8 +1198,8 @@ void updateInstructionWithNewOperand(Instruction * I,
            return;
        }
 
-       if (isa<PtrToIntInst>(I)) {
-           DEBUG(llvm::errs() << "No need to update ptrtoint\n";);
+       if (PtrToIntInst *PTI = dyn_cast<PtrToIntInst>(I)) {
+           updatePtrToIntWithNewOperand(PTI, oldOperand, newOperand, updatesNeeded);
            return;
        }
 
@@ -1192,9 +1213,14 @@ void updateInstructionWithNewOperand(Instruction * I,
            return;
        }
 
-       if (isa<AtomicRMWInst>(I) || isa<AtomicCmpXchgInst>(I) || isa<FenceInst>(I)) {
-           appendMemoryScopeMetadata(I);
-           return; 
+       if (AtomicRMWInst *ARMWI = dyn_cast<AtomicRMWInst>(I)) {
+           updateAtomicRMWWithNewOperand(ARMWI, oldOperand, newOperand, updatesNeeded);
+           return;
+       }
+
+       if (isa<AtomicCmpXchgInst>(I) || isa<FenceInst>(I)) {
+           DEBUG(llvm::errs() << "AtomicCmpXchgInst and FenceInst may need to be updated\n";);
+           return;
        }
 
        if (isa<ReturnInst>(I)) {
@@ -1217,7 +1243,7 @@ static bool usedInTheFunc(const User *U, const Function* F)
   if (const Instruction *instr = dyn_cast<Instruction>(U)) {
     if (instr->getParent() && instr->getParent()->getParent()) {
       const Function *curFunc = instr->getParent()->getParent();
-      if (curFunc->getName().str() == F->getName().str()) 
+      if (curFunc->getName().str() == F->getName().str())
         return true;
       else
         return false;
@@ -1319,7 +1345,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
     for (Module::global_iterator I = globals.begin(), E = globals.end();
         I != E; I++) {
         unsigned the_space = LocalAddressSpace;
-        if (!I->hasSection() && I->isConstant() && 
+        if (!I->hasSection() && I->isConstant() &&
             I->getType()->getPointerAddressSpace() == 0 &&
             I->hasName() && I->getLinkage() == GlobalVariable::InternalLinkage) {
             // Though I'm global, I'm constant indeed.
@@ -1327,7 +1353,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
             the_space = ConstantAddressSpace;
           else
             continue;
-        } else if (!I->hasSection() && I->isConstant() && 
+        } else if (!I->hasSection() && I->isConstant() &&
             I->getType()->getPointerAddressSpace() == 0 &&
             I->hasName() && I->getLinkage() == GlobalVariable::PrivateLinkage) {
             // Though I'm private, I'm constant indeed.
@@ -1337,7 +1363,6 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
               the_space = ConstantAddressSpace;
             else
               continue;
-               
         } else if (!I->hasSection() ||
             I->getSection() != std::string(TILE_STATIC_NAME) ||
             !I->hasName()) {
@@ -1536,10 +1561,10 @@ void updateArgUsers (Function * F, InstUpdateWorkList * updateNeeded)
 
 // updateOperandType - Replace types of operand and return values with the promoted types if necessary
 // This function goes through the function's body and handles GEPs and select instruction specially.
-// After a function is cloned by calling CloneFunctionInto, some of the operands types 
+// After a function is cloned by calling CloneFunctionInto, some of the operands types
 // might not be updated correctly. Neither are some of  the instructions' return types.
 // For example,
-// (1) getelementptr instruction will leave type of its pointer operand un-promoted 
+// (1) getelementptr instruction will leave type of its pointer operand un-promoted
 // (2) select instruction will not update its return type as what has been changed to its #1 or #2 operand
 // Note that It is always safe to call this function right after CloneFunctionInto
 //
@@ -1618,7 +1643,7 @@ Function * createPromotedFunctionToType ( Function * F, FunctionType * promoteTy
               newFuncName = F->getName().str() + "_local";
               DEBUG(llvm::errs() << newFuncName << "\n";);
               promotedFunction = F->getParent()->getFunction(newFuncName);
-              if (!promotedFunction) { 
+              if (!promotedFunction) {
                 newFunction->setName(F->getName() + "_local");
               } else {
                 newFunction = promotedFunction;
@@ -1628,7 +1653,7 @@ Function * createPromotedFunctionToType ( Function * F, FunctionType * promoteTy
               newFuncName = F->getName().str() + "_global";
               DEBUG(llvm::errs() << newFuncName << "\n";);
               promotedFunction = F->getParent()->getFunction(newFuncName);
-              if (!promotedFunction) { 
+              if (!promotedFunction) {
                 newFunction->setName(F->getName() + "_global");
               } else {
                 newFunction = promotedFunction;
@@ -1944,19 +1969,6 @@ bool PromoteGlobals::runOnModule(Module& M)
                 promotedKernels[*F] = promoted;
         }
         updateKernels (M, promotedKernels);
-
-        /// FIXME: The following code can be removed. It is too late to add
-        ///        NoDuplicate attribute on barrier in Promote pass. We already
-        //         add NoDuplicate attribute in clang
-#if 0
-        // If the barrier present is used, we need to ensure it cannot be duplicated.
-        for (Module::iterator F = M.begin(), Fe = M.end(); F != Fe; ++F) {
-                StringRef name = F->getName();
-                if (name.equals ("barrier")) {
-                        F->addFnAttr (Attribute::NoDuplicate);
-                }
-        }
-#endif
 
         // Rename local variables per SPIR naming rule
         Module::GlobalListType &globals = M.getGlobalList();

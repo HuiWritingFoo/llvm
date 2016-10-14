@@ -30,8 +30,9 @@ struct FuzzingOptions {
   bool UseIndirCalls = true;
   bool UseMemcmp = true;
   bool UseMemmem = true;
-  bool UseFullCoverageSet = false;
-  bool Reload = true;
+  bool UseValueProfile = false;
+  bool Shrink = false;
+  int ReloadIntervalSec = 1;
   bool ShuffleAtStartUp = true;
   bool PreferSmall = true;
   size_t MaxNumberOfRuns = -1L;
@@ -40,14 +41,16 @@ struct FuzzingOptions {
   std::string OutputCorpus;
   std::string ArtifactPrefix = "./";
   std::string ExactArtifactPath;
+  std::string ExitOnSrcPos;
+  std::string ExitOnItem;
   bool SaveArtifacts = true;
   bool PrintNEW = true; // Print a status line when new units are found;
   bool OutputCSV = false;
   bool PrintNewCovPcs = false;
   bool PrintFinalStats = false;
+  bool PrintCorpusStats = false;
   bool PrintCoverage = false;
   bool DetectLeaks = true;
-  bool PruneCorpus = true;
 };
 
 }  // namespace fuzzer

@@ -48,7 +48,7 @@ public:
 }
 
 INITIALIZE_PASS(AMDGPUOCL12Adapter, "amdgpu-opencl-12-adapter",
-                "Convert OpenCL 1.2 builtins to 2.0 builtins", false, false);
+                "Convert OpenCL 1.2 builtins to 2.0 builtins", false, false)
 
 char AMDGPUOCL12Adapter::ID = 0;
 
@@ -219,11 +219,6 @@ static bool findAndDefineBuiltinCalls(Module &M) {
       DEBUG(dbgs() << "\n Modifying Func " << F.getName() << " to call "
        << NewFunc->getName() << " Function");
       createOCL20BuiltinFuncDefn(&F, NewFunc);
-      for (auto UI : NewFunc->users()) {
-        CallInst *CI = dyn_cast<CallInst>(UI++);
-        if (CI->getCallingConv() != CallingConv::SPIR_FUNC)
-          CI->setCallingConv(CallingConv::SPIR_FUNC);
-      }
     }
   }
   return isModified;

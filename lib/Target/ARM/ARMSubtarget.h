@@ -43,7 +43,7 @@ class ARMSubtarget : public ARMGenSubtargetInfo {
 protected:
   enum ARMProcFamilyEnum {
     Others, CortexA5, CortexA7, CortexA8, CortexA9, CortexA12, CortexA15,
-    CortexA17, CortexR4, CortexR4F, CortexR5, CortexR7, CortexM3,
+    CortexA17, CortexR4, CortexR4F, CortexR5, CortexR7, CortexR52, CortexM3,
     CortexA32, CortexA35, CortexA53, CortexA57, CortexA72, CortexA73,
     Krait, Swift, ExynosM1
   };
@@ -53,7 +53,8 @@ protected:
   enum ARMArchEnum {
     ARMv2, ARMv2a, ARMv3, ARMv3m, ARMv4, ARMv4t, ARMv5, ARMv5t, ARMv5te,
     ARMv5tej, ARMv6, ARMv6k, ARMv6kz, ARMv6t2, ARMv6m, ARMv6sm, ARMv7a, ARMv7r,
-    ARMv7m, ARMv7em, ARMv8a, ARMv81a, ARMv82a, ARMv8mMainline, ARMv8mBaseline
+    ARMv7m, ARMv7em, ARMv8a, ARMv81a, ARMv82a, ARMv8mMainline, ARMv8mBaseline,
+    ARMv8r
   };
 
 public:
@@ -567,10 +568,12 @@ public:
   }
   /// Returns true if the frame setup is split into two separate pushes (first
   /// r0-r7,lr then r8-r11), principally so that the frame pointer is adjacent
-  /// to lr.
+  /// to lr. This is always required on Thumb1-only targets, as the push and
+  /// pop instructions can't access the high registers.
   bool splitFramePushPop(const MachineFunction &MF) const {
-    return useR7AsFramePointer() &&
-           MF.getTarget().Options.DisableFramePointerElim(MF);
+    return (useR7AsFramePointer() &&
+            MF.getTarget().Options.DisableFramePointerElim(MF)) ||
+           isThumb1Only();
   }
 
   bool useStride4VFPs(const MachineFunction &MF) const;

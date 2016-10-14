@@ -442,6 +442,7 @@ protected:
     uint16_t : NumLSBaseSDNodeBits;
 
     uint16_t ExtTy : 2; // enum ISD::LoadExtType
+    uint16_t IsExpanding : 1;
   };
 
   class StoreSDNodeBitfields {
@@ -451,6 +452,7 @@ protected:
     uint16_t : NumLSBaseSDNodeBits;
 
     uint16_t IsTruncating : 1;
+    uint16_t IsCompressing : 1;
   };
 
   union {
@@ -470,7 +472,7 @@ protected:
   static_assert(sizeof(ConstantSDNodeBitfields) <= 2, "field too wide");
   static_assert(sizeof(MemSDNodeBitfields) <= 2, "field too wide");
   static_assert(sizeof(LSBaseSDNodeBitfields) <= 2, "field too wide");
-  static_assert(sizeof(LoadSDNodeBitfields) <= 2, "field too wide");
+  static_assert(sizeof(LoadSDNodeBitfields) <= 4, "field too wide");
   static_assert(sizeof(StoreSDNodeBitfields) <= 2, "field too wide");
 
 private:
@@ -1919,9 +1921,11 @@ class MaskedLoadSDNode : public MaskedLoadStoreSDNode {
 public:
   friend class SelectionDAG;
   MaskedLoadSDNode(unsigned Order, const DebugLoc &dl, SDVTList VTs,
-                   ISD::LoadExtType ETy, EVT MemVT, MachineMemOperand *MMO)
+                   ISD::LoadExtType ETy, bool IsExpanding, EVT MemVT,
+                   MachineMemOperand *MMO)
       : MaskedLoadStoreSDNode(ISD::MLOAD, Order, dl, VTs, MemVT, MMO) {
     LoadSDNodeBits.ExtTy = ETy;
+    LoadSDNodeBits.IsExpanding = IsExpanding;
   }
 
   ISD::LoadExtType getExtensionType() const {
@@ -1932,6 +1936,8 @@ public:
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::MLOAD;
   }
+
+  bool isExpandingLoad() const { return LoadSDNodeBits.IsExpanding; }
 };
 
 /// This class is used to represent an MSTORE node
@@ -1940,14 +1946,22 @@ class MaskedStoreSDNode : public MaskedLoadStoreSDNode {
 public:
   friend class SelectionDAG;
   MaskedStoreSDNode(unsigned Order, const DebugLoc &dl, SDVTList VTs,
-                    bool isTrunc, EVT MemVT, MachineMemOperand *MMO)
+                    bool isTrunc, bool isCompressing, EVT MemVT, 
+                    MachineMemOperand *MMO)
       : MaskedLoadStoreSDNode(ISD::MSTORE, Order, dl, VTs, MemVT, MMO) {
     StoreSDNodeBits.IsTruncating = isTrunc;
+    StoreSDNodeBits.IsCompressing = isCompressing;
   }
   /// Return true if the op does a truncation before store.
   /// For integers this is the same as doing a TRUNCATE and storing the result.
   /// For floats, it is the same as doing an FP_ROUND and storing the result.
   bool isTruncatingStore() const { return StoreSDNodeBits.IsTruncating; }
+
+  /// Returns true if the op does a compression to the vector before storing.
+  /// The node contiguously stores the active elements (integers or floats) 
+  /// in src (those with their respective bit set in writemask k) to unaligned 
+  /// memory at base_addr.
+  bool isCompressingStore() const { return StoreSDNodeBits.IsCompressing; }
 
   const SDValue &getValue() const { return getOperand(3); }
 

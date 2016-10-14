@@ -513,6 +513,12 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   setPrefFunctionAlignment(STI.getPrefFunctionAlignment());
   setPrefLoopAlignment(STI.getPrefLoopAlignment());
 
+  // Only change the limit for entries in a jump table if specified by
+  // the subtarget, but not at the command line.
+  unsigned MaxJT = STI.getMaximumJumpTableSize();
+  if (MaxJT && getMaximumJumpTableSize() == 0)
+    setMaximumJumpTableSize(MaxJT);
+
   setHasExtractBitsInsn(true);
 
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
@@ -7050,16 +7056,6 @@ bool AArch64TargetLowering::isExtFreeImpl(const Instruction *Ext) const {
     // for that use.
   }
   return true;
-}
-
-bool AArch64TargetLowering::hasPairedLoad(Type *LoadedType,
-                                          unsigned &RequiredAligment) const {
-  if (!LoadedType->isIntegerTy() && !LoadedType->isFloatTy())
-    return false;
-  // Cyclone supports unaligned accesses.
-  RequiredAligment = 0;
-  unsigned NumBits = LoadedType->getPrimitiveSizeInBits();
-  return NumBits == 32 || NumBits == 64;
 }
 
 bool AArch64TargetLowering::hasPairedLoad(EVT LoadedType,

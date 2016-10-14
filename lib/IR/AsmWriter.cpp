@@ -1418,7 +1418,8 @@ struct MDFieldPrinter {
 
 void MDFieldPrinter::printTag(const DINode *N) {
   Out << FS << "tag: ";
-  if (const char *Tag = dwarf::TagString(N->getTag()))
+  auto Tag = dwarf::TagString(N->getTag());
+  if (!Tag.empty())
     Out << Tag;
   else
     Out << N->getTag();
@@ -1426,7 +1427,8 @@ void MDFieldPrinter::printTag(const DINode *N) {
 
 void MDFieldPrinter::printMacinfoType(const DIMacroNode *N) {
   Out << FS << "type: ";
-  if (const char *Type = dwarf::MacinfoString(N->getMacinfoType()))
+  auto Type = dwarf::MacinfoString(N->getMacinfoType());
+  if (!Type.empty())
     Out << Type;
   else
     Out << N->getMacinfoType();
@@ -1488,8 +1490,8 @@ void MDFieldPrinter::printDIFlags(StringRef Name, DINode::DIFlags Flags) {
 
   FieldSeparator FlagsFS(" | ");
   for (auto F : SplitFlags) {
-    const char *StringF = DINode::getFlagString(F);
-    assert(StringF && "Expected valid flag");
+    auto StringF = DINode::getFlagString(F);
+    assert(!StringF.empty() && "Expected valid flag");
     Out << FlagsFS << StringF;
   }
   if (Extra || SplitFlags.empty())
@@ -1509,7 +1511,8 @@ void MDFieldPrinter::printDwarfEnum(StringRef Name, IntTy Value,
     return;
 
   Out << FS << Name << ": ";
-  if (const char *S = toString(Value))
+  auto S = toString(Value);
+  if (!S.empty())
     Out << S;
   else
     Out << Value;
@@ -1813,6 +1816,8 @@ static void writeDIGlobalVariable(raw_ostream &Out, const DIGlobalVariable *N,
   Printer.printMetadata("scope", N->getRawScope(), /* ShouldSkipNull */ false);
   Printer.printMetadata("file", N->getRawFile());
   Printer.printInt("line", N->getLine());
+  Printer.printInt("addressSpace", N->getAddressSpace(),
+                   /* ShouldSkipZero */ false);
   Printer.printMetadata("type", N->getRawType());
   Printer.printBool("isLocal", N->isLocalToUnit());
   Printer.printBool("isDefinition", N->isDefinition());
@@ -1831,6 +1836,8 @@ static void writeDILocalVariable(raw_ostream &Out, const DILocalVariable *N,
   Printer.printMetadata("scope", N->getRawScope(), /* ShouldSkipNull */ false);
   Printer.printMetadata("file", N->getRawFile());
   Printer.printInt("line", N->getLine());
+  Printer.printInt("addressSpace", N->getAddressSpace(),
+                   /* ShouldSkipZero */ false);
   Printer.printMetadata("type", N->getRawType());
   Printer.printDIFlags("flags", N->getFlags());
   Out << ")";
@@ -1843,8 +1850,8 @@ static void writeDIExpression(raw_ostream &Out, const DIExpression *N,
   FieldSeparator FS;
   if (N->isValid()) {
     for (auto I = N->expr_op_begin(), E = N->expr_op_end(); I != E; ++I) {
-      const char *OpStr = dwarf::OperationEncodingString(I->getOp());
-      assert(OpStr && "Expected valid opcode");
+      auto OpStr = dwarf::OperationEncodingString(I->getOp());
+      assert(!OpStr.empty() && "Expected valid opcode");
 
       Out << FS << OpStr;
       for (unsigned A = 0, AE = I->getNumArgs(); A != AE; ++A)
@@ -2055,6 +2062,7 @@ public:
   void writeAtomicCmpXchg(AtomicOrdering SuccessOrdering,
                           AtomicOrdering FailureOrdering,
                           SynchronizationScope SynchScope);
+  void writeSynchScope(SynchronizationScope SynchScope);
 
   void writeAllMDNodes();
   void writeMDNode(unsigned Slot, const MDNode *Node);
@@ -2120,20 +2128,7 @@ void AssemblyWriter::writeAtomic(AtomicOrdering Ordering,
   if (Ordering == AtomicOrdering::NotAtomic)
     return;
 
-  if (SynchScope >= SynchronizationScopeFirstTargetSpecific) {
-    Out << " synchscope(" << unsigned(SynchScope) << ')';
-  } else {
-    switch (SynchScope) {
-    case SingleThread:
-      Out << " singlethread";
-      break;
-    case CrossThread:
-      break;
-    default:
-      llvm_unreachable("Unknown SynchScope");
-    }
-  }
-
+  writeSynchScope(SynchScope);
   Out << " " << toIRString(Ordering);
 }
 
@@ -2143,8 +2138,14 @@ void AssemblyWriter::writeAtomicCmpXchg(AtomicOrdering SuccessOrdering,
   assert(SuccessOrdering != AtomicOrdering::NotAtomic &&
          FailureOrdering != AtomicOrdering::NotAtomic);
 
+  writeSynchScope(SynchScope);
+  Out << " " << toIRString(SuccessOrdering);
+  Out << " " << toIRString(FailureOrdering);
+}
+
+void AssemblyWriter::writeSynchScope(SynchronizationScope SynchScope) {
   if (SynchScope >= SynchronizationScopeFirstTargetSpecific) {
-    Out << " synchscope(" << unsigned(SynchScope) << ')';
+    Out << " syncscope(" << unsigned(SynchScope) << ')';
   } else {
     switch (SynchScope) {
     case SingleThread:
@@ -2153,12 +2154,9 @@ void AssemblyWriter::writeAtomicCmpXchg(AtomicOrdering SuccessOrdering,
     case CrossThread:
       break;
     default:
-      llvm_unreachable("Unknown SynchScope");
+      llvm_unreachable("Invalid syncscope");
     }
   }
-
-  Out << " " << toIRString(SuccessOrdering);
-  Out << " " << toIRString(FailureOrdering);
 }
 
 void AssemblyWriter::writeParamOperand(const Value *Operand,

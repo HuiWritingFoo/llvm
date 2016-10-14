@@ -61,12 +61,16 @@ class LLVM_LIBRARY_VISIBILITY ARMAsmPrinter : public AsmPrinter {
   /// data from every MachineFunction. It is used during doFinalization
   /// when all non-function globals are emitted.
   SmallPtrSet<const GlobalVariable*,2> PromotedGlobals;
+  /// Set of globals in PromotedGlobals that we've emitted labels for.
+  /// We need to emit labels even for promoted globals so that DWARF
+  /// debug info can link properly.
+  SmallPtrSet<const GlobalVariable*,2> EmittedPromotedGlobalLabels;
 
 public:
   explicit ARMAsmPrinter(TargetMachine &TM,
                          std::unique_ptr<MCStreamer> Streamer);
 
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "ARM Assembly / Object Emitter";
   }
 

@@ -542,13 +542,13 @@ MachineMemOperand::MachineMemOperand(MachinePointerInfo ptrinfo, Flags f,
                                      AtomicOrdering Ordering,
                                      AtomicOrdering FailureOrdering)
     : PtrInfo(ptrinfo), Size(s), FlagVals(f), BaseAlignLog2(Log2_32(a) + 1),
-      AAInfo(AAInfo), Ranges(Ranges), SynchScope(SynchScope),
-      Ordering(Ordering), FailureOrdering(FailureOrdering) {
+      AAInfo(AAInfo), Ranges(Ranges) {
   assert((PtrInfo.V.isNull() || PtrInfo.V.is<const PseudoSourceValue*>() ||
           isa<PointerType>(PtrInfo.V.get<const Value*>()->getType())) &&
          "invalid pointer value");
   assert(getBaseAlignment() == a && "Alignment is not a power of 2!");
   assert((isLoad() || isStore()) && "Not a load/store!");
+  InitAtomicInfo(SynchScope, Ordering, FailureOrdering);
 }
 
 /// Profile - Gather unique data for the object.
@@ -1299,8 +1299,8 @@ bool MachineInstr::hasRegisterImplicitUseOperand(unsigned Reg) const {
 /// findRegisterUseOperandIdx() - Returns the MachineOperand that is a use of
 /// the specific register or -1 if it is not found. It further tightens
 /// the search criteria to a use that kills the register if isKill is true.
-int MachineInstr::findRegisterUseOperandIdx(unsigned Reg, bool isKill,
-                                          const TargetRegisterInfo *TRI) const {
+int MachineInstr::findRegisterUseOperandIdx(
+    unsigned Reg, bool isKill, const TargetRegisterInfo *TRI) const {
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     const MachineOperand &MO = getOperand(i);
     if (!MO.isReg() || !MO.isUse())
@@ -1308,11 +1308,9 @@ int MachineInstr::findRegisterUseOperandIdx(unsigned Reg, bool isKill,
     unsigned MOReg = MO.getReg();
     if (!MOReg)
       continue;
-    if (MOReg == Reg ||
-        (TRI &&
-         TargetRegisterInfo::isPhysicalRegister(MOReg) &&
-         TargetRegisterInfo::isPhysicalRegister(Reg) &&
-         TRI->isSubRegister(MOReg, Reg)))
+    if (MOReg == Reg || (TRI && TargetRegisterInfo::isPhysicalRegister(MOReg) &&
+                         TargetRegisterInfo::isPhysicalRegister(Reg) &&
+                         TRI->isSubRegister(MOReg, Reg)))
       if (!isKill || MO.isKill())
         return i;
   }

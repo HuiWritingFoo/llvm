@@ -13,54 +13,71 @@
 #define LLVM_FUZZER_TRACE_PC
 
 #include "FuzzerDefs.h"
+#include "FuzzerValueBitMap.h"
 
 namespace fuzzer {
 
 class TracePC {
  public:
-  void HandleTrace(uintptr_t *guard, uintptr_t PC);
-  void HandleInit(uintptr_t *start, uintptr_t *stop);
+  static const size_t kFeatureSetSize = ValueBitMap::kNumberOfItems;
+
+  void HandleTrace(uint32_t *guard, uintptr_t PC);
+  void HandleInit(uint32_t *start, uint32_t *stop);
   void HandleCallerCallee(uintptr_t Caller, uintptr_t Callee);
-  size_t GetTotalCoverage() { return TotalCoverage; }
+  void HandleValueProfile(size_t Value) { ValueProfileMap.AddValue(Value); }
+  size_t GetTotalPCCoverage() { return TotalPCCoverage; }
+  void ResetTotalPCCoverage() { TotalPCCoverage = 0; }
   void SetUseCounters(bool UC) { UseCounters = UC; }
-  size_t UpdateCounterMap(ValueBitMap *Map);
-  void FinalizeTrace();
+  void SetUseValueProfile(bool VP) { UseValueProfile = VP; }
+  size_t FinalizeTrace(InputCorpus *C, size_t InputSize, bool Shrink);
+  bool UpdateValueProfileMap(ValueBitMap *MaxValueProfileMap) {
+    return UseValueProfile && MaxValueProfileMap->MergeFrom(ValueProfileMap);
+    }
 
-  size_t GetNewPCsAndFlush(uintptr_t **NewPCsPtr = nullptr) {
-    if (NewPCsPtr)
-      *NewPCsPtr = NewPCs;
-    size_t Res = NumNewPCs;
-    NumNewPCs = 0;
-    return Res;
+
+  size_t GetNewPCIDs(uintptr_t **NewPCIDsPtr) {
+    *NewPCIDsPtr = NewPCIDs;
+    return Min(kMaxNewPCIDs, NumNewPCIDs);
   }
 
-  void Reset() {
-    TotalCoverage = 0;
-    TotalCounterBits = 0;
-    NumNewPCs = 0;
-    CounterMap.Reset();
-    TotalCoverageMap.Reset();
-    ResetGuards();
+  uintptr_t GetPCbyPCID(uintptr_t PCID) { return PCs[PCID]; }
+
+  void ResetMaps() {
+    NumNewPCIDs = 0;
+    ValueProfileMap.Reset();
+    memset(Counters, 0, sizeof(Counters));
   }
+
+  void UpdateFeatureSet(size_t CurrentElementIdx, size_t CurrentElementSize);
+  void PrintFeatureSet();
+
+  void ResetGuards();
 
   void PrintModuleInfo();
 
   void PrintCoverage();
 
+  void AddValueForMemcmp(void *caller_pc, const void *s1, const void *s2,
+                         size_t n);
+  void AddValueForStrcmp(void *caller_pc, const char *s1, const char *s2,
+                         size_t n);
+
+  bool UsingTracePcGuard() const {return NumModules; }
+
 private:
   bool UseCounters = false;
-  size_t TotalCoverage = 0;
-  size_t TotalCounterBits = 0;
+  bool UseValueProfile = false;
+  size_t TotalPCCoverage = 0;
 
-  static const size_t kMaxNewPCs = 64;
-  uintptr_t NewPCs[kMaxNewPCs];
-  size_t NumNewPCs = 0;
-  void AddNewPC(uintptr_t PC) { NewPCs[(NumNewPCs++) % kMaxNewPCs] = PC; }
-
-  void ResetGuards();
+  static const size_t kMaxNewPCIDs = 1024;
+  uintptr_t NewPCIDs[kMaxNewPCIDs];
+  size_t NumNewPCIDs = 0;
+  void AddNewPCID(uintptr_t PCID) {
+    NewPCIDs[(NumNewPCIDs++) % kMaxNewPCIDs] = PCID;
+  }
 
   struct Module {
-    uintptr_t *Start, *Stop;
+    uint32_t *Start, *Stop;
   };
 
   Module Modules[4096];
@@ -68,13 +85,12 @@ private:
   size_t NumGuards = 0;
 
   static const size_t kNumCounters = 1 << 14;
-  uint8_t Counters[kNumCounters];
+  alignas(8) uint8_t Counters[kNumCounters];
 
-  static const size_t kNumPCs = 1 << 20;
+  static const size_t kNumPCs = 1 << 24;
   uintptr_t PCs[kNumPCs];
 
-  ValueBitMap CounterMap;
-  ValueBitMap TotalCoverageMap;
+  ValueBitMap ValueProfileMap;
 };
 
 extern TracePC TPC;

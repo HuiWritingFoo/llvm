@@ -605,9 +605,11 @@ static ARMBuildAttrs::CPUArch getArchForCPU(StringRef CPU,
   if (CPU == "xscale")
     return ARMBuildAttrs::v5TEJ;
 
-  if (Subtarget->hasV8Ops())
+  if (Subtarget->hasV8Ops()) {
+    if (Subtarget->isRClass())
+      return ARMBuildAttrs::v8_R;
     return ARMBuildAttrs::v8_A;
-  else if (Subtarget->hasV8MMainlineOps())
+  } else if (Subtarget->hasV8MMainlineOps())
     return ARMBuildAttrs::v8_M_Main;
   else if (Subtarget->hasV7Ops()) {
     if (Subtarget->isMClass() && Subtarget->hasDSP())
@@ -781,12 +783,12 @@ void ARMAsmPrinter::emitAttributes() {
   // Set FP Denormals.
   if (haveAllFunctionsAttribute(*MMI->getModule(), "denormal-fp-math",
                                 "preserve-sign") ||
-      TM.Options.FPDenormalType == FPDenormal::PreserveSign)
+      TM.Options.FPDenormalMode == FPDenormal::PreserveSign)
     ATS.emitAttribute(ARMBuildAttrs::ABI_FP_denormal,
                       ARMBuildAttrs::PreserveFPSign);
   else if (haveAllFunctionsAttribute(*MMI->getModule(), "denormal-fp-math",
                                      "positive-zero") ||
-           TM.Options.FPDenormalType == FPDenormal::PositiveZero)
+           TM.Options.FPDenormalMode == FPDenormal::PositiveZero)
     ATS.emitAttribute(ARMBuildAttrs::ABI_FP_denormal,
                       ARMBuildAttrs::PositiveZero);
   else if (!TM.Options.UnsafeFPMath)
@@ -939,7 +941,7 @@ void ARMAsmPrinter::emitAttributes() {
 
 //===----------------------------------------------------------------------===//
 
-static MCSymbol *getPICLabel(const char *Prefix, unsigned FunctionNumber,
+static MCSymbol *getPICLabel(StringRef Prefix, unsigned FunctionNumber,
                              unsigned LabelId, MCContext &Ctx) {
 
   MCSymbol *Label = Ctx.getOrCreateSymbol(Twine(Prefix)
@@ -1015,6 +1017,26 @@ EmitMachineConstantPoolValue(MachineConstantPoolValue *MCPV) {
 
   ARMConstantPoolValue *ACPV = static_cast<ARMConstantPoolValue*>(MCPV);
 
+  if (ACPV->isPromotedGlobal()) {
+    // This constant pool entry is actually a global whose storage has been
+    // promoted into the constant pool. This global may be referenced still
+    // by debug information, and due to the way AsmPrinter is set up, the debug
+    // info is immutable by the time we decide to promote globals to constant
+    // pools. Because of this, we need to ensure we emit a symbol for the global
+    // with private linkage (the default) so debug info can refer to it.
+    //
+    // However, if this global is promoted into several functions we must ensure
+    // we don't try and emit duplicate symbols!
+    auto *ACPC = cast<ARMConstantPoolConstant>(ACPV);
+    auto *GV = ACPC->getPromotedGlobal();
+    if (!EmittedPromotedGlobalLabels.count(GV)) {
+      MCSymbol *GVSym = getSymbol(GV);
+      OutStreamer->EmitLabel(GVSym);
+      EmittedPromotedGlobalLabels.insert(GV);
+    }
+    return EmitGlobalConstant(DL, ACPC->getPromotedGlobalInit());
+  }
+
   MCSymbol *MCSym;
   if (ACPV->isLSDA()) {
     MCSym = getCurExceptionSym();
@@ -1034,7 +1056,7 @@ EmitMachineConstantPoolValue(MachineConstantPoolValue *MCPV) {
     MCSym = MBB->getSymbol();
   } else {
     assert(ACPV->isExtSymbol() && "unrecognized constant pool value");
-    const char *Sym = cast<ARMConstantPoolSymbol>(ACPV)->getSymbol();
+    auto Sym = cast<ARMConstantPoolSymbol>(ACPV)->getSymbol();
     MCSym = GetExternalSymbolSymbol(Sym);
   }
 
@@ -2042,8 +2064,8 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
 // Force static initialization.
 extern "C" void LLVMInitializeARMAsmPrinter() {
-  RegisterAsmPrinter<ARMAsmPrinter> X(TheARMLETarget);
-  RegisterAsmPrinter<ARMAsmPrinter> Y(TheARMBETarget);
-  RegisterAsmPrinter<ARMAsmPrinter> A(TheThumbLETarget);
-  RegisterAsmPrinter<ARMAsmPrinter> B(TheThumbBETarget);
+  RegisterAsmPrinter<ARMAsmPrinter> X(getTheARMLETarget());
+  RegisterAsmPrinter<ARMAsmPrinter> Y(getTheARMBETarget());
+  RegisterAsmPrinter<ARMAsmPrinter> A(getTheThumbLETarget());
+  RegisterAsmPrinter<ARMAsmPrinter> B(getTheThumbBETarget());
 }

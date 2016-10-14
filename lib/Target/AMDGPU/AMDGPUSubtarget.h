@@ -53,6 +53,7 @@ public:
     ISAVersion7_0_1,
     ISAVersion8_0_0,
     ISAVersion8_0_1,
+    ISAVersion8_0_2,
     ISAVersion8_0_3
   };
 
@@ -140,6 +141,10 @@ public:
 
   bool isMesa3DOS() const {
     return TargetTriple.getOS() == Triple::Mesa3D;
+  }
+
+  bool isOpenCLEnv() const {
+    return TargetTriple.getEnvironment() == Triple::OpenCL;
   }
 
   Generation getGeneration() const {
@@ -286,6 +291,14 @@ public:
 
   unsigned getAlignmentForImplicitArgPtr() const {
     return isAmdHsaOS() ? 8 : 4;
+  }
+
+  unsigned getImplicitArgNumBytes() const {
+    if (isMesa3DOS())
+      return 16;
+    if (isAmdHsaOS() && isOpenCLEnv())
+      return 32;
+    return 0;
   }
 
   unsigned getStackAlignment() const {
@@ -521,11 +534,19 @@ public:
     return SGPRInitBug;
   }
 
+  unsigned getKernArgSegmentSize(unsigned ExplictArgBytes) const;
+
   /// Return the maximum number of waves per SIMD for kernels using \p SGPRs SGPRs
   unsigned getOccupancyWithNumSGPRs(unsigned SGPRs) const;
 
   /// Return the maximum number of waves per SIMD for kernels using \p VGPRs VGPRs
   unsigned getOccupancyWithNumVGPRs(unsigned VGPRs) const;
+
+  /// \returns True if waitcnt instruction is needed before barrier instruction,
+  /// false otherwise.
+  bool needWaitcntBeforeBarrier() const {
+    return true;
+  }
 };
 
 } // End namespace llvm

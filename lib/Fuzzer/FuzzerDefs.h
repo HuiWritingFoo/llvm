@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -36,12 +37,16 @@
 
 namespace fuzzer {
 
+template <class T> T Min(T a, T b) { return a < b ? a : b; }
+template <class T> T Max(T a, T b) { return a > b ? a : b; }
+
 class Random;
 class Dictionary;
 class DictionaryEntry;
 class MutationDispatcher;
 struct FuzzingOptions;
 class InputCorpus;
+struct InputInfo;
 struct ExternalFunctions;
 
 // Global interface to functions that may or may not be available.
@@ -55,11 +60,13 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback);
 bool IsFile(const std::string &Path);
 long GetEpoch(const std::string &Path);
 std::string FileToString(const std::string &Path);
-Unit FileToVector(const std::string &Path, size_t MaxSize = 0);
+Unit FileToVector(const std::string &Path, size_t MaxSize = 0,
+                  bool ExitOnError = true);
 void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V,
-                            long *Epoch, size_t MaxSize);
+                            long *Epoch, size_t MaxSize, bool ExitOnError);
 void WriteToFile(const Unit &U, const std::string &Path);
 void CopyFileToErr(const std::string &Path);
+void DeleteFile(const std::string &Path);
 // Returns "Dir/FileName" or equivalent for the current OS.
 std::string DirPlusFile(const std::string &DirPath,
                         const std::string &FileName);
@@ -74,6 +81,7 @@ void PrintASCII(const uint8_t *Data, size_t Size, const char *PrintAfter = "");
 void PrintASCII(const Unit &U, const char *PrintAfter = "");
 
 void PrintPC(const char *SymbolizedFMT, const char *FallbackFMT, uintptr_t PC);
+std::string DescribePC(const char *SymbolizedFMT, uintptr_t PC);
 std::string Hash(const Unit &U);
 void SetTimer(int Seconds);
 void SetSigSegvHandler();
@@ -91,7 +99,7 @@ size_t GetPeakRSSMb();
 static const int kSHA1NumBytes = 20;
 // Computes SHA1 hash of 'Len' bytes in 'Data', writes kSHA1NumBytes to 'Out'.
 void ComputeSHA1(const uint8_t *Data, size_t Len, uint8_t *Out);
-std::string Sha1ToString(uint8_t Sha1[kSHA1NumBytes]);
+std::string Sha1ToString(const uint8_t Sha1[kSHA1NumBytes]);
 
 // Changes U to contain only ASCII (isprint+isspace) characters.
 // Returns true iff U has been changed.

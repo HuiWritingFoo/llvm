@@ -15,6 +15,7 @@ target triple = "armv7--linux-gnueabihf"
 @.arr2 = private unnamed_addr constant [2 x i16] [i16 7, i16 8], align 2
 @.arr3 = private unnamed_addr constant [2 x i16*] [i16* null, i16* null], align 4
 @.ptr = private unnamed_addr constant [2 x i16*] [i16* getelementptr inbounds ([2 x i16], [2 x i16]* @.arr2, i32 0, i32 0), i16* null], align 2
+@.arr4 = private unnamed_addr constant [2 x i16] [i16 3, i16 4], align 16
 
 ; CHECK-LABEL: @test1
 ; CHECK: adr r0, [[x:.*]]
@@ -105,8 +106,38 @@ define void @test8() #0 {
   ret void
 }
 
+@fn1.a = private unnamed_addr constant [4 x i16] [i16 4, i16 0, i16 0, i16 0], align 2
+@fn2.a = private unnamed_addr constant [8 x i8] [i8 4, i8 0, i8 0, i8 0, i8 23, i8 0, i8 6, i8 0], align 1
+
+; Just check these don't crash.
+define void @fn1() "target-features"="+strict-align"  {
+entry:
+  %a = alloca [4 x i16], align 2
+  %0 = bitcast [4 x i16]* %a to i8*
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %0, i8* bitcast ([4 x i16]* @fn1.a to i8*), i32 8, i32 2, i1 false)
+  ret void
+}
+
+define void @fn2() "target-features"="+strict-align"  {
+entry:
+  %a = alloca [8 x i8], align 2
+  %0 = bitcast [8 x i8]* %a to i8*
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %0, i8* bitcast ([8 x i8]* @fn2.a to i8*), i32 16, i32 1, i1 false)
+  ret void
+}
+
+; This shouldn't be promoted, as the global requires >4 byte alignment.
+; CHECK-LABEL: @test9
+; CHECK-NOT: adr
+define void @test9() #0 {
+  tail call void @c(i16* getelementptr inbounds ([2 x i16], [2 x i16]* @.arr4, i32 0, i32 0)) #2
+  ret void
+}
+
+
 declare void @b(i8*) #1
 declare void @c(i16*) #1
+declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture writeonly, i8* nocapture readonly, i32, i32, i1)
 
 attributes #0 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }

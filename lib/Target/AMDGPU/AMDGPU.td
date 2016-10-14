@@ -122,6 +122,7 @@ def FeatureISAVersion7_0_0 : SubtargetFeatureISAVersion <7,0,0>;
 def FeatureISAVersion7_0_1 : SubtargetFeatureISAVersion <7,0,1>;
 def FeatureISAVersion8_0_0 : SubtargetFeatureISAVersion <8,0,0>;
 def FeatureISAVersion8_0_1 : SubtargetFeatureISAVersion <8,0,1>;
+def FeatureISAVersion8_0_2 : SubtargetFeatureISAVersion <8,0,2>;
 def FeatureISAVersion8_0_3 : SubtargetFeatureISAVersion <8,0,3>;
 
 class SubtargetFeatureLocalMemorySize <int Value> : SubtargetFeature<
@@ -349,6 +350,10 @@ def AMDGPUAsmParser : AsmParser {
   let ShouldEmitMatchRegisterName = 0;
 }
 
+def AMDGPUAsmWriter : AsmWriter {
+  int PassSubtarget = 1;
+}
+
 def AMDGPUAsmVariants {
   string Default = "Default";
   int Default_ID = 0;
@@ -390,6 +395,7 @@ def AMDGPU : Target {
                                 VOP3AsmParserVariant,
                                 SDWAAsmParserVariant,
                                 DPPAsmParserVariant];
+  let AssemblyWriters = [AMDGPUAsmWriter];
 }
 
 // Dummy Instruction itineraries for pseudo instructions

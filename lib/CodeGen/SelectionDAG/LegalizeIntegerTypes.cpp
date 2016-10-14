@@ -102,6 +102,11 @@ void DAGTypeLegalizer::PromoteIntegerResult(SDNode *N, unsigned ResNo) {
   case ISD::CONCAT_VECTORS:
                          Res = PromoteIntRes_CONCAT_VECTORS(N); break;
 
+  case ISD::ANY_EXTEND_VECTOR_INREG:
+  case ISD::SIGN_EXTEND_VECTOR_INREG:
+  case ISD::ZERO_EXTEND_VECTOR_INREG:
+                         Res = PromoteIntRes_EXTEND_VECTOR_INREG(N); break;
+
   case ISD::SIGN_EXTEND:
   case ISD::ZERO_EXTEND:
   case ISD::ANY_EXTEND:  Res = PromoteIntRes_INT_EXTEND(N); break;
@@ -1319,6 +1324,7 @@ void DAGTypeLegalizer::ExpandIntegerResult(SDNode *N, unsigned ResNo) {
   case ISD::CTPOP:       ExpandIntRes_CTPOP(N, Lo, Hi); break;
   case ISD::CTTZ_ZERO_UNDEF:
   case ISD::CTTZ:        ExpandIntRes_CTTZ(N, Lo, Hi); break;
+  case ISD::FLT_ROUNDS_: ExpandIntRes_FLT_ROUNDS(N, Lo, Hi); break;
   case ISD::FP_TO_SINT:  ExpandIntRes_FP_TO_SINT(N, Lo, Hi); break;
   case ISD::FP_TO_UINT:  ExpandIntRes_FP_TO_UINT(N, Lo, Hi); break;
   case ISD::LOAD:        ExpandIntRes_LOAD(cast<LoadSDNode>(N), Lo, Hi); break;
@@ -2004,6 +2010,19 @@ void DAGTypeLegalizer::ExpandIntRes_CTTZ(SDNode *N,
                                  DAG.getConstant(NVT.getSizeInBits(), dl,
                                                  NVT)));
   Hi = DAG.getConstant(0, dl, NVT);
+}
+
+void DAGTypeLegalizer::ExpandIntRes_FLT_ROUNDS(SDNode *N, SDValue &Lo,
+                                               SDValue &Hi) {
+  SDLoc dl(N);
+  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), N->getValueType(0));
+  unsigned NBitWidth = NVT.getSizeInBits();
+
+  EVT ShiftAmtTy = TLI.getShiftAmountTy(NVT, DAG.getDataLayout());
+  Lo = DAG.getNode(ISD::FLT_ROUNDS_, dl, NVT);
+  // The high part is the sign of Lo, as -1 is a valid value for FLT_ROUNDS
+  Hi = DAG.getNode(ISD::SRA, dl, NVT, Lo,
+                   DAG.getConstant(NBitWidth - 1, dl, ShiftAmtTy));
 }
 
 void DAGTypeLegalizer::ExpandIntRes_FP_TO_SINT(SDNode *N, SDValue &Lo,
@@ -3321,6 +3340,25 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CONCAT_VECTORS(SDNode *N) {
   }
 
   return DAG.getNode(ISD::BUILD_VECTOR, dl, NOutVT, Ops);
+}
+
+SDValue DAGTypeLegalizer::PromoteIntRes_EXTEND_VECTOR_INREG(SDNode *N) {
+  EVT VT = N->getValueType(0);
+  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), VT);
+  assert(NVT.isVector() && "This type must be promoted to a vector type");
+
+  SDLoc dl(N);
+
+  // For operands whose TypeAction is to promote, the promoted node to construct
+  // a new *_EXTEND_VECTOR_INREG node.
+  if (getTypeAction(N->getOperand(0).getValueType())
+      == TargetLowering::TypePromoteInteger) {
+    SDValue Promoted = GetPromotedInteger(N->getOperand(0));
+    return DAG.getNode(N->getOpcode(), dl, NVT, Promoted);
+  }
+
+  // Directly extend to the appropriate transform-to type.
+  return DAG.getNode(N->getOpcode(), dl, NVT, N->getOperand(0));
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_INSERT_VECTOR_ELT(SDNode *N) {

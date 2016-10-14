@@ -40,11 +40,11 @@ public:
     return false;
   }
 
-  //==========================================================================//
-  bool useXderef() const override;
-  unsigned getAddrSpace(const MachineFunction &MF, int FI) const override;
-  int getOffset(const MachineFunction &MF, int FI) const override;
-  //==========================================================================//
+  bool targetUsesAddressSpace() const {
+    return true;
+  }
+
+  int getFrameIndexOffset(const MachineFunction &MF, int FI) const;
 };
 } // namespace llvm
 #endif

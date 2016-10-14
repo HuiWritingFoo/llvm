@@ -592,10 +592,10 @@ static unsigned getEncodedOrdering(AtomicOrdering Ordering) {
 static unsigned getEncodedSynchScope(SynchronizationScope SynchScope) {
   if (SynchScope >= SynchronizationScopeFirstTargetSpecific)
     return unsigned(bitc::SYNCHSCOPE_FIRSTTARGETSPECIFIC +
-      (SynchScope - SynchronizationScopeFirstTargetSpecific));
+        (SynchScope - SynchronizationScopeFirstTargetSpecific));
 
   switch (SynchScope) {
-  default: llvm_unreachable("Invalid synch scope");
+  default: llvm_unreachable("Invalid syncscope");
   case SingleThread: return bitc::SYNCHSCOPE_SINGLETHREAD;
   case CrossThread: return bitc::SYNCHSCOPE_CROSSTHREAD;
   }
@@ -1711,6 +1711,7 @@ void ModuleBitcodeWriter::writeDIGlobalVariable(
   Record.push_back(VE.getMetadataOrNullID(N->getRawLinkageName()));
   Record.push_back(VE.getMetadataOrNullID(N->getFile()));
   Record.push_back(N->getLine());
+  Record.push_back(N->getAddressSpace());
   Record.push_back(VE.getMetadataOrNullID(N->getType()));
   Record.push_back(N->isLocalToUnit());
   Record.push_back(N->isDefinition());
@@ -1729,6 +1730,7 @@ void ModuleBitcodeWriter::writeDILocalVariable(
   Record.push_back(VE.getMetadataOrNullID(N->getRawName()));
   Record.push_back(VE.getMetadataOrNullID(N->getFile()));
   Record.push_back(N->getLine());
+  Record.push_back(N->getAddressSpace());
   Record.push_back(VE.getMetadataOrNullID(N->getType()));
   Record.push_back(N->getArg());
   Record.push_back(N->getFlags());
@@ -3297,10 +3299,8 @@ void ModuleBitcodeWriter::writePerModuleFunctionSummaryRecord(
   bool HasProfileData = F.getEntryCount().hasValue();
   for (auto &ECI : Calls) {
     NameVals.push_back(getValueId(ECI.first));
-    assert(ECI.second.CallsiteCount > 0 && "Expected at least one callsite");
-    NameVals.push_back(ECI.second.CallsiteCount);
     if (HasProfileData)
-      NameVals.push_back(ECI.second.ProfileCount);
+      NameVals.push_back(static_cast<uint8_t>(ECI.second.Hotness));
   }
 
   unsigned FSAbbrev = (HasProfileData ? FSCallsProfileAbbrev : FSCallsAbbrev);
@@ -3340,7 +3340,7 @@ void ModuleBitcodeWriter::writeModuleLevelReferences(
 // Current version for the summary.
 // This is bumped whenever we introduce changes in the way some record are
 // interpreted, like flags for instance.
-static const uint64_t INDEX_VERSION = 1;
+static const uint64_t INDEX_VERSION = 2;
 
 /// Emit the per-module summary section alongside the rest of
 /// the module's bitcode.
@@ -3361,7 +3361,7 @@ void ModuleBitcodeWriter::writePerModuleGlobalValueSummary() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
-  // numrefs x valueid, n x (valueid, callsitecount)
+  // numrefs x valueid, n x (valueid)
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   unsigned FSCallsAbbrev = Stream.EmitAbbrev(Abbv);
@@ -3373,7 +3373,7 @@ void ModuleBitcodeWriter::writePerModuleGlobalValueSummary() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
-  // numrefs x valueid, n x (valueid, callsitecount, profilecount)
+  // numrefs x valueid, n x (valueid, hotness)
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   unsigned FSCallsProfileAbbrev = Stream.EmitAbbrev(Abbv);
@@ -3446,7 +3446,7 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
-  // numrefs x valueid, n x (valueid, callsitecount)
+  // numrefs x valueid, n x (valueid)
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   unsigned FSCallsAbbrev = Stream.EmitAbbrev(Abbv);
@@ -3459,7 +3459,7 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
-  // numrefs x valueid, n x (valueid, callsitecount, profilecount)
+  // numrefs x valueid, n x (valueid, hotness)
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   unsigned FSCallsProfileAbbrev = Stream.EmitAbbrev(Abbv);
@@ -3546,7 +3546,7 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
 
     bool HasProfileData = false;
     for (auto &EI : FS->calls()) {
-      HasProfileData |= EI.second.ProfileCount != 0;
+      HasProfileData |= EI.second.Hotness != CalleeInfo::HotnessType::Unknown;
       if (HasProfileData)
         break;
     }
@@ -3557,10 +3557,8 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
       if (!hasValueId(EI.first.getGUID()))
         continue;
       NameVals.push_back(getValueId(EI.first.getGUID()));
-      assert(EI.second.CallsiteCount > 0 && "Expected at least one callsite");
-      NameVals.push_back(EI.second.CallsiteCount);
       if (HasProfileData)
-        NameVals.push_back(EI.second.ProfileCount);
+        NameVals.push_back(static_cast<uint8_t>(EI.second.Hotness));
     }
 
     unsigned FSAbbrev = (HasProfileData ? FSCallsProfileAbbrev : FSCallsAbbrev);

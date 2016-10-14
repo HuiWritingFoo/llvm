@@ -164,7 +164,7 @@ class TypePromotionTransaction;
       }
     bool runOnFunction(Function &F) override;
 
-    const char *getPassName() const override { return "CodeGen Prepare"; }
+    StringRef getPassName() const override { return "CodeGen Prepare"; }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       // FIXME: When we can selectively preserve passes, preserve the domtree.
@@ -926,6 +926,8 @@ static bool SinkCmpExpression(CmpInst *CI, const TargetLowering *TLI) {
       InsertedCmp =
           CmpInst::Create(CI->getOpcode(), CI->getPredicate(),
                           CI->getOperand(0), CI->getOperand(1), "", &*InsertPt);
+      // Propagate the debug info.
+      InsertedCmp->setDebugLoc(CI->getDebugLoc());
     }
 
     // Replace a use of the cmp with a use of the new cmp.

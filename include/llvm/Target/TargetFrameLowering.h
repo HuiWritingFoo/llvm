@@ -139,6 +139,16 @@ public:
     return nullptr;
   }
 
+  /// targetUsesAddressSpace - Returns true if target uses address spaces.
+  virtual bool targetUsesAddressSpace() const {
+    return false;
+  }
+
+  virtual int getFrameIndexOffset(const MachineFunction &MF, int FI) const {
+    assert(targetUsesAddressSpace());
+    return 0;
+  }
+
   /// targetHandlesStackFrameRounding - Returns true if the target is
   /// responsible for rounding up the stack frame (probably at emitPrologue
   /// time).
@@ -157,20 +167,6 @@ public:
   virtual bool enableStackSlotScavenging(const MachineFunction &MF) const {
     return false;
   }
-
-  //==========================================================================//
-  virtual bool useXderef() const {
-    return false;
-  }
-  virtual unsigned getAddrSpace(const MachineFunction &MF, int FI) const {
-    assert(useXderef());
-    return 0;
-  }
-  virtual int getOffset(const MachineFunction &MF, int FI) const {
-    assert(useXderef());
-    return 0;
-  }
-  //==========================================================================//
 
   /// emitProlog/emitEpilog - These methods insert prolog and epilog code into
   /// the function.
@@ -192,12 +188,6 @@ public:
   /// the assembly prologue to explicitly handle the stack.
   virtual void adjustForHiPEPrologue(MachineFunction &MF,
                                      MachineBasicBlock &PrologueMBB) const {}
-
-  /// Adjust the prologue to add an allocation at a fixed offset from the frame
-  /// pointer.
-  virtual void
-  adjustForFrameAllocatePrologue(MachineFunction &MF,
-                                 MachineBasicBlock &PrologueMBB) const {}
 
   /// spillCalleeSavedRegisters - Issues instruction(s) to spill all callee
   /// saved registers and returns true if it isn't possible / profitable to do

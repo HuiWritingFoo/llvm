@@ -12,6 +12,7 @@
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPU_H
 
 #include "llvm/IR/Instructions.h"
+#include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
 
@@ -76,6 +77,9 @@ extern char &SILowerControlFlowID;
 void initializeSIInsertSkipsPass(PassRegistry &);
 extern char &SIInsertSkipsPassID;
 
+void initializeSIOptimizeExecMaskingPass(PassRegistry &);
+extern char &SIOptimizeExecMaskingID;
+
 ModulePass *createAMDGPUConvertAtomicLibCallsPass();
 void initializeAMDGPUConvertAtomicLibCallsPass(PassRegistry &);
 extern char &AMDGPUConvertAtomicLibCallsID;
@@ -86,7 +90,8 @@ void initializeAMDGPUPromoteAllocaPass(PassRegistry&);
 extern char &AMDGPUPromoteAllocaID;
 
 Pass *createAMDGPUStructurizeCFGPass();
-FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
+FunctionPass *createAMDGPUISelDag(TargetMachine &TM,
+                                  CodeGenOpt::Level OptLevel);
 ModulePass *createAMDGPUAlwaysInlinePass();
 ModulePass *createAMDGPUOpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
@@ -120,8 +125,8 @@ extern char &SIDebuggerInsertNopsID;
 void initializeSIInsertWaitsPass(PassRegistry&);
 extern char &SIInsertWaitsID;
 
-extern Target TheAMDGPUTarget;
-extern Target TheGCNTarget;
+Target &getTheAMDGPUTarget();
+Target &getTheGCNTarget();
 
 namespace AMDGPU {
 enum TargetIndex {
@@ -181,7 +186,7 @@ enum AddressSpaces : unsigned {
 } // namespace AMDGPUAS
 
 /// AMDGPU-specific synchronization scopes.
-enum class AMDGPUSynchronizationScope : unsigned {
+enum class AMDGPUSynchronizationScope : uint8_t {
   /// Synchronized with respect to the entire system, which includes all
   /// work-items on all agents executing kernel dispatches for the same
   /// application process, together with all agents executing the same
