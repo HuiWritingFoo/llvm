@@ -918,14 +918,18 @@ void updateGEPWithNewOperand(GetElementPtrInst * GEP, Value * oldOperand, Value 
         PointerType * futurePtrType = dyn_cast<PointerType>(futureType);
         if ( !futurePtrType ) return;
 
-        // Must replace with new GEP to handle such case
+        Type* PointeeType = cast<PointerType>(newOperand->getType()->getScalarType())->getElementType();
+        if (!PointeeType) return;
+        // The old GEP might not be valid after CloneFunctionInto, see below
         // %26 = getelementptr inbounds %"class.Concurrency::graphics::unorm", %@"class.Concurrency::graphics::unorm.0" addrespace(1) %25, i64 0, i64 %25
 
         GEP->setOperand (GEP->getPointerOperandIndex(), newOperand);
-        if ( futurePtrType == GEP->getType()) return;
+        if (GEP->getSourceElementType() != PointeeType) {
+          GEP->setSourceElementType(PointeeType);
+          GEP->setResultElementType(GetElementPtrInst::getIndexedType(GEP->getSourceElementType(), Indices));
+        }
 
-        Type* PointeeType = cast<PointerType>(newOperand->getType()->getScalarType())->getElementType();
-        if (!PointeeType) return;
+        if ( futurePtrType == GEP->getType()) return;
 
         GetElementPtrInst* newGEP = GetElementPtrInst::Create(PointeeType, newOperand,
                 SmallVector<Value *, 8>(GEP->idx_begin(), GEP->idx_end()), GEP->getName(), GEP);
