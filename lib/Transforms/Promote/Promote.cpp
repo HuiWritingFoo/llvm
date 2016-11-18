@@ -1982,6 +1982,16 @@ bool PromoteGlobals::runOnModule(Module& M)
                 }
                 (*F)->setLinkage(GlobalValue::InternalLinkage);
                 promotedKernels[*F] = promoted;
+
+                if (M.getTargetTriple().find("nvptx") != std::string::npos) {
+                  while (promoted->getName().find('.') != StringRef::npos) {
+                    // PTX does not accept any dot in the function name
+                    size_t n = promoted->getName().find('.');
+                    std::string tmp = promoted->getName();
+                    tmp[n] = 'x';
+                    promoted->setName(tmp);
+                  }
+                }
         }
         updateKernels (M, promotedKernels);
 
