@@ -858,26 +858,15 @@ void updateBitCastInstWithNewOperand(BitCastInst * BI, Value *oldOperand, Value 
         PointerType * sourcePtrType = dyn_cast<PointerType>(sourceType);
         if (!sourcePtrType) return;
 
-        // The old bitcast instruction might have wrong address space in dest pointer type, see %1818
-        // This is due to a function clone by CloneFunctionInto
-        //%1817 = bitcast float addrspace(1)* %arrayidx21.i.tmp.sroa.12.0.sroa_cast to i32 addrspace(1)*
-        //%1818 = bitcast float addrspace(1)* %arrayidx21.i.tmp.sroa.12.0.sroa_cast to i32*
-        PointerType* srcTy = dyn_cast<PointerType>(BI->getSrcTy());
-        PointerType* dstTy = dyn_cast<PointerType>(BI->getDestTy());
-        if (srcTy && dstTy && srcTy->getAddressSpace() != dstTy->getAddressSpace()) {
-          PointerType* nDstTy = PointerType::get(elementType, srcTy->getAddressSpace());
-          BI->mutateType(nDstTy);
-        }
-
         PointerType * newDestType =
                 PointerType::get(elementType,
                                  sourcePtrType->getAddressSpace());
 
-        BitCastInst * newBCI = new BitCastInst (newOperand, newDestType,
-                                                "", BI);
+        BI->setOperand(0, newOperand);
+        BI->mutateType(newDestType);
 
         updateListWithUsers (BI->user_begin(), BI->user_end(),
-                             BI, newBCI, updatesNeeded);
+                             BI, BI, updatesNeeded);
 }
 
 void updateAddrSpaceCastInstWithNewOperand(AddrSpaceCastInst * AI, Value *oldOperand, Value * newOperand, InstUpdateWorkList * updatesNeeded)
