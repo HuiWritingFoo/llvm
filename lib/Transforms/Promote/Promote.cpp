@@ -924,17 +924,11 @@ void updateGEPWithNewOperand(GetElementPtrInst * GEP, Value * oldOperand, Value 
         // %26 = getelementptr inbounds %"class.Concurrency::graphics::unorm", %@"class.Concurrency::graphics::unorm.0" addrespace(1) %25, i64 0, i64 %25
 
         GEP->setOperand (GEP->getPointerOperandIndex(), newOperand);
-        if (GEP->getSourceElementType() != PointeeType) {
-          GEP->setSourceElementType(PointeeType);
-          GEP->setResultElementType(GetElementPtrInst::getIndexedType(GEP->getSourceElementType(), Indices));
-        }
+        GEP->mutateType(futurePtrType);
+        GEP->setSourceElementType(PointeeType);
+        GEP->setResultElementType(GetElementPtrInst::getIndexedType(GEP->getSourceElementType(), Indices));
 
-        if ( futurePtrType == GEP->getType()) return;
-
-        GetElementPtrInst* newGEP = GetElementPtrInst::Create(PointeeType, newOperand,
-                SmallVector<Value *, 8>(GEP->idx_begin(), GEP->idx_end()), GEP->getName(), GEP);
-        newGEP->setIsInBounds(GEP->isInBounds());
-        updateListWithUsers(GEP->user_begin(), GEP->user_end(), GEP, newGEP, updatesNeeded);
+        updateListWithUsers(GEP->user_begin(), GEP->user_end(), GEP, GEP, updatesNeeded);
 #endif
 }
 
