@@ -1917,16 +1917,18 @@ bool PromoteGlobals::runOnModule(Module& M)
         for (auto &GV : M.globals()) {
           StringRef Name = GV.getName();
           if (Name[0] == '.') {
-            Twine FixedName("x", Name.substr(1));
-            GV.setName(FixedName);
+            std::string FixedName(Name.str());
+            FixedName[0] = 'x';
+            GV.setName(StringRef(FixedName));
           }
         }
+
         for (auto &F : foundKernels) {
                 if (F->empty())
                     continue;
-                Function * promoted = createPromotedFunction (*F);
-                promoted->takeName (*F);
-                promoted->setName(promoted->getName().str());
+                Function * promoted = createPromotedFunction (F);
+                promoted->takeName (F);
+                promoted->setName(promoted->getName());
                 if (M.getTargetTriple().find("nvptx") != std::string::npos) {
                   promoted->setCallingConv(llvm::CallingConv::PTX_Kernel);
                 } else {
@@ -1938,16 +1940,16 @@ bool PromoteGlobals::runOnModule(Module& M)
                         GlobalValue::InternalLinkage) {
                     promoted->setLinkage(GlobalValue::ExternalLinkage);
                 }
-                (*F)->setLinkage(GlobalValue::InternalLinkage);
-                promotedKernels[*F] = promoted;
+                F->setLinkage(GlobalValue::InternalLinkage);
+                promotedKernels[F] = promoted;
 
                 if (M.getTargetTriple().find("nvptx") != std::string::npos) {
                   while (promoted->getName().find('.') != StringRef::npos) {
                     // PTX does not accept any dot in the function name
                     size_t n = promoted->getName().find('.');
-                    std::string tmp = promoted->getName();
+                    std::string tmp(promoted->getName().str());
                     tmp[n] = 'x';
-                    promoted->setName(tmp);
+                    promoted->setName(StringRef(tmp));
                   }
                 }
         }
