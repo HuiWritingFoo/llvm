@@ -42,7 +42,7 @@ typedef std::map <Function *, Function *> FunctionMap;
 
 /* The name of the MDNode into which the list of
    MD nodes referencing each HCC kernel is stored. */
-static Twine KernelListMDNodeName = "hcc.kernels";
+const char *KernelListMDNodeName = "hcc.kernels";
 
 const unsigned PrivateAddressSpace = 0; // AMDGPUAS::PRIVATE_ADDRESS
 const unsigned GlobalAddressSpace = 1;  // AMDGPUAS::GLOBAL_ADDRESS
@@ -419,7 +419,7 @@ NamedMDNode * getNewKernelListMDNode (Module & M)
         if ( current ) {
                 M.eraseNamedMetadata (current);
         }
-        return M.getOrInsertNamedMetadata (KernelListMDNodeName.str());
+        return M.getOrInsertNamedMetadata(KernelListMDNodeName);
 }
 
 Type * mapTypeToGlobal ( Type *);
@@ -795,14 +795,35 @@ void updatePHINodeWithNewOperand(PHINode * I, Value * oldOperand,
 
 void updateStoreInstWithNewOperand(StoreInst * I, Value * oldOperand, Value * newOperand, InstUpdateWorkList * updatesNeeded)
 {
+        DEBUG(llvm::errs() << "\n=====\nStoreInst: "; I->dump();
+        llvm::errs() << "pointerOperand: "; I->getPointerOperand()->dump();
+        llvm::errs() << "destType: "; I->getPointerOperand()->getType()->dump();
+        llvm::errs() << "destType element type: "; dyn_cast<PointerType>(I->getPointerOperand()->getType())->getElementType()->dump();
+        llvm::errs() << "valueOperand: "; I->getValueOperand()->dump();
+        llvm::errs() << "valueOperand type: "; I->getValueOperand()->getType()->dump();
+        llvm::errs() << "oldOperand: "; oldOperand->dump();
+        llvm::errs() << "newOperand: "; newOperand->dump();
+
+        llvm::errs() << "StoreInst users: "; I->dump(); llvm::errs() << "\n";
+        for (Value::user_iterator U = I->user_begin(), UE = I->user_end(); U != UE; ++U) {
+          U->dump(); llvm::errs() << "\n";
+        }
+        llvm::errs() << "\n======\n";);
+
         unsigned index = I->getOperand(1) == oldOperand?1:0;
         I->setOperand(index, newOperand);
         Value * storeOperand = I->getPointerOperand();
         PointerType * destType =
                 dyn_cast<PointerType>(storeOperand->getType());
 
-        if ( destType->getElementType ()
-             == I->getValueOperand()->getType() ) return;
+        DEBUG(llvm::errs() << "index: " << index << "\n";
+        llvm::errs() << "updated StoreInst: "; I->dump(););
+
+        if ( (destType->getElementType () == I->getValueOperand()->getType()) && 
+             (oldOperand == newOperand) ) {
+          DEBUG(llvm::errs() << "updateStoreInstWithNewOperand early exit #1\n=====\n";);
+          return;
+        }
 
 
         if ( index == StoreInst::getPointerOperandIndex () ) {
@@ -840,31 +861,44 @@ void updateCallInstWithNewOperand(CallInst * CI, Value * oldOperand, Value * new
         }
 }
 
+static Type *ReMapPointerTypeAccordingToAddressSpace(Type *LHS, Type *RHS) {
+  DEBUG(llvm::errs() << "LHS: "; LHS->dump();
+  llvm::errs() << "RHS: "; RHS->dump(););
+
+  Type *T = nullptr;
+  if (PointerType *LPT = dyn_cast<PointerType>(LHS)) {
+    PointerType *RPT = dyn_cast<PointerType>(RHS);
+    assert(RPT);
+    T = PointerType::get( ReMapPointerTypeAccordingToAddressSpace(LPT->getElementType(), RPT->getElementType()),
+                          LPT->getAddressSpace() );
+  } else {
+    T = mapTypeToGlobal(RHS);
+  }
+  DEBUG(llvm::errs() << "return: "; T->dump(););
+  return T;
+}
+
 void updateBitCastInstWithNewOperand(BitCastInst * BI, Value *oldOperand, Value * newOperand, InstUpdateWorkList * updatesNeeded)
 {
+        DEBUG(llvm::errs() << "BI: "; BI->dump();
+        llvm::errs() << "BI Type: "; BI->getType()->dump();
+        llvm::errs() << "newOperand: "; newOperand->dump();
+        llvm::errs() << "newOperand Type: "; newOperand->getType()->dump(););
+
         Type * currentType = BI->getType();
         PointerType * currentPtrType = dyn_cast<PointerType>(currentType);
         if (!currentPtrType) return;
 
-        // make sure pointers inside the casted type are also promoted
-        // this fixes an issue when a class has a vtbl gets captured in the kernel,
-        // the size of vtbl would not be correctly calculated
-        Type *elementType = currentPtrType->getElementType();
-        if (StructType *ST = dyn_cast<StructType>(elementType)) {
-          elementType = mapTypeToGlobal(ST);
-        }
-
-        Type * sourceType = newOperand->getType();
-        PointerType * sourcePtrType = dyn_cast<PointerType>(sourceType);
-        if (!sourcePtrType) return;
-
-        PointerType * newDestType =
-                PointerType::get(elementType,
-                                 sourcePtrType->getAddressSpace());
+        Type *newType = ReMapPointerTypeAccordingToAddressSpace(newOperand->getType(), BI->getType());
+        DEBUG(llvm::errs() << "newType: "; newType->dump(););
+        PointerType *newDestType = dyn_cast<PointerType>(newType);
 
         BI->setOperand(0, newOperand);
         BI->mutateType(newDestType);
 
+        DEBUG(llvm::errs() << "newBI: "; newBCI->dump();
+        llvm::errs() << "newBI Type: "; newBCI->getType()->dump();
+        llvm::errs() << "newBI address space: " << dyn_cast<PointerType>(newBCI->getType())->getAddressSpace() << "\n";);
         updateListWithUsers (BI->user_begin(), BI->user_end(),
                              BI, BI, updatesNeeded);
 }
@@ -901,35 +935,60 @@ void updateAddrSpaceCastInstWithNewOperand(AddrSpaceCastInst * AI, Value *oldOpe
 void updateGEPWithNewOperand(GetElementPtrInst * GEP, Value * oldOperand, Value * newOperand, InstUpdateWorkList * updatesNeeded)
 {
         DEBUG(llvm::errs() << "=== BEFORE UPDATE GEP ===\n";
-        llvm::errs() << "new operand: "; newOperand->getType()->dump(); llvm::errs() << "\n";);
+        llvm::errs() << "GEP: "; GEP->dump(); llvm::errs() << "\n";
+        llvm::errs() << "GEP type: "; GEP->getType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "GEP src element type: "; GEP->getSourceElementType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "GEP result element type: "; GEP->getResultElementType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "old operand: "; oldOperand->dump(); llvm::errs() << "\n";
+        llvm::errs() << "old operand type: "; oldOperand->getType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "new operand: "; newOperand->dump(); llvm::errs() << "\n";
+        llvm::errs() << "new operand type: "; newOperand->getType()->dump(); llvm::errs() << "\n";);
 
-        if ( GEP->getPointerOperand() != oldOperand ) return;
+        if ( GEP->getPointerOperand() != oldOperand ) {
+          DEBUG(llvm::errs() << "update GEP early return #1\n";);
+          return;
+        }
 
         std::vector<Value *> Indices(GEP->idx_begin(), GEP->idx_end());
-#if 0
-        Type* basisType = newOperand->getType()->getPointerElementType();
-        GetElementPtrInst* newGEPI = GetElementPtrInst::Create(basisType, newOperand, Indices, "", GEP);
-        DEBUG(newGEPI->dump(); llvm::errs() << "\n";);
-        updateListWithUsers(GEP->user_begin(), GEP->user_end(), GEP, newGEPI, updatesNeeded);
-#else
+
         Type * futureType =
         GEP->getGEPReturnType(newOperand, ArrayRef<Value *>(Indices));
-
         PointerType * futurePtrType = dyn_cast<PointerType>(futureType);
-        if ( !futurePtrType ) return;
+        if ( !futurePtrType ) {
+          DEBUG(llvm::errs() << "update GEP early return #2\n";);
+          return;
+        }
 
         Type* PointeeType = cast<PointerType>(newOperand->getType()->getScalarType())->getElementType();
-        if (!PointeeType) return;
-        // The old GEP might not be valid after CloneFunctionInto, see below
-        // %26 = getelementptr inbounds %"class.Concurrency::graphics::unorm", %@"class.Concurrency::graphics::unorm.0" addrespace(1) %25, i64 0, i64 %25
+        if (!PointeeType) {
+          DEBUG(llvm::errs() << "early return #3\n";);
+          return;
+        }
 
+        // update GEP pointer operand
         GEP->setOperand (GEP->getPointerOperandIndex(), newOperand);
+
+        // update GEP return type
         GEP->mutateType(futurePtrType);
+
+        // update GEP source element type
         GEP->setSourceElementType(PointeeType);
-        GEP->setResultElementType(GetElementPtrInst::getIndexedType(GEP->getSourceElementType(), Indices));
+
+        // update GEP result element type
+        // FIXME: this may not be the best solution
+        GEP->setResultElementType(futurePtrType->getElementType());
+
+        DEBUG(llvm::errs() << "=== AFTER UPDATE GEP ===\n";
+        llvm::errs() << "GEP: "; GEP->dump(); llvm::errs() << "\n";
+        llvm::errs() << "GEP type: "; GEP->getType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "GEP src element type: "; GEP->getSourceElementType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "GEP result element type: "; GEP->getResultElementType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "old operand: "; oldOperand->dump(); llvm::errs() << "\n";
+        llvm::errs() << "old operand type: "; oldOperand->getType()->dump(); llvm::errs() << "\n";
+        llvm::errs() << "new operand: "; newOperand->dump(); llvm::errs() << "\n";
+        llvm::errs() << "new operand type: "; newOperand->getType()->dump(); llvm::errs() << "\n";);
 
         updateListWithUsers(GEP->user_begin(), GEP->user_end(), GEP, GEP, updatesNeeded);
-#endif
 }
 
 void updateCMPWithNewOperand(CmpInst *CMP, Value *oldOperand, Value *newOperand, InstUpdateWorkList *updatesNeeded)
@@ -1241,7 +1300,7 @@ static bool usedInTheFunc(const User *U, const Function* F)
   if (const Instruction *instr = dyn_cast<Instruction>(U)) {
     if (instr->getParent() && instr->getParent()->getParent()) {
       const Function *curFunc = instr->getParent()->getParent();
-      if (curFunc->getName().str() == F->getName().str())
+      if (curFunc == F)
         return true;
       else
         return false;
@@ -1342,35 +1401,30 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
     Module::GlobalListType &globals = M->getGlobalList();
     for (Module::global_iterator I = globals.begin(), E = globals.end();
         I != E; I++) {
-        unsigned the_space = LocalAddressSpace;
+      if (!usedInTheFunc(&*I, Func))
+        continue;
+      unsigned the_space = LocalAddressSpace;
         if (!I->hasSection() && I->isConstant() &&
             I->getType()->getPointerAddressSpace() == 0 &&
             I->hasName() && I->getLinkage() == GlobalVariable::InternalLinkage) {
             // Though I'm global, I'm constant indeed.
-          if(usedInTheFunc(I.operator->(), Func))
             the_space = ConstantAddressSpace;
-          else
-            continue;
         } else if (!I->hasSection() && I->isConstant() &&
             I->getType()->getPointerAddressSpace() == 0 &&
             I->hasName() && I->getLinkage() == GlobalVariable::PrivateLinkage) {
             // Though I'm private, I'm constant indeed.
             // FIXME: We should determine constant with address space (2) for OpenCL SPIR
             //              during clang front-end. It is not reliable to determine that in Promte stage
-            if(usedInTheFunc(I.operator->(), Func))
-              the_space = ConstantAddressSpace;
-            else
-              continue;
+          the_space = ConstantAddressSpace;
         } else if (!I->hasSection() ||
-            I->getSection() != std::string(TILE_STATIC_NAME) ||
-            !I->hasName()) {
+            I->getSection() != TILE_STATIC_NAME || !I->hasName()) {
             // promote to global address space if the variable is used in a kernel
             // and does not come with predefined address space
-            if (usedInTheFunc(I.operator->(), Func) && I->getType()->getPointerAddressSpace() == 0) {
-              the_space = GlobalAddressSpace;
-            } else {
-              continue;
-            }
+          if (I->getType()->getPointerAddressSpace() == 0) {
+            the_space = GlobalAddressSpace;
+          } else {
+            continue;
+          }
         }
 
         // If the address of this global variable is available from host, it
@@ -1386,8 +1440,11 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
         for (Value::user_iterator U = I->user_begin(), Ue = I->user_end();
             U!=Ue;) {
             if (Instruction *Ins = dyn_cast<Instruction>(*U)) {
-                users.insert(Ins->getParent()->getParent());
-                uses.insert(std::make_pair(Ins->getParent()->getParent(), *U));
+                Function *F = Ins->getParent()->getParent();
+                if (F == Func) {
+                  users.insert(F);
+                  uses.insert(std::make_pair(F, *U));
+                }
             } else if (ConstantExpr *C = dyn_cast<ConstantExpr>(*U)) {
                 // Replace ConstantExpr with Instruction so we can track it
                 updateListWithUsers (*U, I.operator->(), I.operator->(), updateNeeded);
@@ -1411,7 +1468,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
 
             // tile static variables cannot have an initializer
             llvm::Constant *Init = nullptr;
-            if (I->hasSection() && (I->getSection() == std::string(TILE_STATIC_NAME))) {
+            if (I->hasSection() && (I->getSection() == TILE_STATIC_NAME)) {
                 Init = llvm::UndefValue::get(I->getType()->getElementType());
             } else {
                 Init = I->hasInitializer() ? I->getInitializer() : 0;
@@ -1423,18 +1480,7 @@ void promoteGlobalVars(Function *Func, InstUpdateWorkList * updateNeeded)
                     Init,
                     "", (GlobalVariable *)0, I->getThreadLocalMode(), the_space);
             new_GV->copyAttributesFrom(I.operator->());
-            if (i == 0) {
-                new_GV->takeName(I.operator->());
-            } else {
-                new_GV->setName(I->getName());
-            }
-            if (new_GV->getName().find('.') == 0) {
-                // HSAIL does not accept dot at the front of identifier
-                // (clang generates dot names for string literals)
-                std::string tmp = new_GV->getName();
-                tmp[0] = 'x';
-                new_GV->setName(tmp);
-            }
+            new_GV->setName(I->getName());
             std::pair<Uses::iterator, Uses::iterator> usesOfSameFunction;
             usesOfSameFunction = uses.equal_range(*F);
             for ( Uses::iterator U = usesOfSameFunction.first, Ue =
@@ -1463,76 +1509,6 @@ void eraseOldTileStaticDefs(Module *M)
             E = todo.end(); I!=E; I++) {
         (*I)->eraseFromParent();
     }
-}
-
-void promoteAllocas (Function * Func,
-                     InstUpdateWorkList * updatesNeeded)
-{
-        typedef BasicBlock::iterator iterator;
-        for (iterator I = Func->begin()->begin();
-             isa<AllocaInst>(I); ++I) {
-                AllocaInst * AI = cast<AllocaInst>(I);
-                Type * allocatedType = AI->getType()->getElementType();
-                Type * promotedType = mapTypeToGlobal(allocatedType);
-
-                if ( allocatedType == promotedType ) continue;
-
-                AllocaInst * clonedAlloca = new AllocaInst(promotedType,
-                                                           AI->getArraySize(),
-                                                           "", AI);
-
-                updateListWithUsers ( AI->user_begin(), AI->user_end(),
-                                      AI, clonedAlloca, updatesNeeded );
-        }
-}
-
-void promoteBitcasts (Function * F, InstUpdateWorkList * updates)
-{
-        typedef std::vector<BitCastInst *> BitCastList;
-        BitCastList foundBitCasts;
-        for (Function::iterator B = F->begin(), Be = F->end();
-             B != Be; ++B) {
-                for (BasicBlock::iterator I = B->begin(), Ie = B->end();
-                     I != Ie; ++I) {
-                        BitCastInst * BI = dyn_cast<BitCastInst>(I);
-                        if ( ! BI ) continue;
-                        foundBitCasts.push_back(BI);
-                }
-        }
-
-        for (BitCastList::const_iterator I = foundBitCasts.begin(),
-             Ie = foundBitCasts.end(); I != Ie; ++I) {
-                BitCastInst * BI = *I;
-
-                Type *destType = BI->getType();
-                PointerType * destPtrType =
-                        dyn_cast<PointerType>(destType);
-                if ( ! destPtrType ) continue;
-
-                Type * srcType = BI->getOperand(0)->getType();
-                PointerType * srcPtrType =
-                        dyn_cast<PointerType>(srcType);
-                if ( ! srcPtrType ) continue;
-#if 0
-                unsigned srcAddressSpace =
-                        srcPtrType->getAddressSpace();
-
-                unsigned destAddressSpace =
-                        destPtrType->getAddressSpace();
-#endif
-                Type * elementType = destPtrType->getElementType();
-                Type * mappedType = mapTypeToGlobal(elementType);
-                unsigned addrSpace = srcPtrType->getAddressSpace();
-                Type * newDestType = PointerType::get(mappedType, addrSpace);
-                if (elementType == mappedType) continue;
-
-                BitCastInst * newBI = new BitCastInst(BI->getOperand(0),
-                                                      newDestType, BI->getName(),
-                                                         BI);
-                updateListWithUsers (BI->user_begin(), BI->user_end(),
-                                     BI, newBI, updates);
-        }
-
 }
 
 bool hasPtrToNonZeroAddrSpace (Value * V)
@@ -1574,10 +1550,13 @@ void updateOperandType(Function * oldF, Function * newF, FunctionType* ty, InstU
     for (BasicBlock::iterator I = B->begin(), Ie = B->end(); I != Ie; ++I) {
       if (SelectInst *Sel = dyn_cast<SelectInst>(I)) {
         assert(Sel->getOperand(1) && "#1  operand  of Select Instruction is invalid!");
+        DEBUG(llvm::errs() << "updateOperandType: SelectInst: "; Sel->dump(); llvm::errs() << "\n";);
         if (Sel->getType() != I->getOperand(1)->getType()) {
           // mutate type only when absolutely necessary
           Sel->mutateType(I->getOperand(1)->getType());
           updateListWithUsers(I->user_begin(), I->user_end(), I.operator->(), I.operator->(), workList);
+        } else {
+          DEBUG(llvm::errs() << "NOT going to update SelectInst users\n";);
         }
       } else if( GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(I)) {
         // Only handle GEPs with parameters promoted (ex: after a select instruction)
@@ -1677,36 +1656,25 @@ Function * createPromotedFunctionToType ( Function * F, FunctionType * promoteTy
 
         ValueToValueMapTy CorrectedMapping;
         InstUpdateWorkList workList;
-//        promoteAllocas(newFunction, workList);
-//        promoteBitcasts(newFunction, workList);
         promoteGlobalVars(newFunction, &workList);
         updateArgUsers (newFunction, &workList);
         updateOperandType(F, newFunction, promoteType, &workList);
 
         do {
-                /*while( !workList.empty() ) {
-                        update_token update = workList.back();
-                        workList.pop_back();
-                        updateInstructionWithNewOperand (update.subject,
-                                                         update.oldOperand,
-                                                         update.newOperand,
-                                                         workList);
-
-                }*/
                 workList.run();
                 CollectChangedCalledFunctions ( newFunction, &workList );
         } while ( !workList.empty() );
 
         eraseOldTileStaticDefs(F->getParent());
 
-        // don't verify the new function if it is only a declaration
-        if (!newFunction->isDeclaration() && verifyFunction (*newFunction, &llvm::errs()/*PrintMessageAction*/)) {
+        DEBUG(// don't verify the new function if it is only a declaration
+        if (!newFunction->isDeclaration() && verifyFunction (*newFunction/*, PrintMessageAction*/)) {
                 llvm::errs() << "When checking the updated function of: ";
                 F->dump();
                 llvm::errs() << " into: ";
                 newFunction->dump();
         }
-        DEBUG(llvm::errs() << "-------------------------------------------";);
+        llvm::errs() << "-------------------------------------------";);
         return newFunction;
 }
 
@@ -1944,10 +1912,17 @@ bool PromoteGlobals::runOnModule(Module& M)
         FunctionMap promotedKernels;
         if (!findKernels(M, foundKernels)) return false;
 
-        typedef FunctionVect::const_iterator kernel_iterator;
-        for (kernel_iterator F = foundKernels.begin(), Fe = foundKernels.end();
-             F != Fe; ++F) {
-                if ((*F)->empty())
+        // HSAIL does not accept dot at the front of identifier
+        // (clang generates dot names for string literals)
+        for (auto &GV : M.globals()) {
+          StringRef Name = GV.getName();
+          if (Name[0] == '.') {
+            Twine FixedName("x", Name.substr(1));
+            GV.setName(FixedName);
+          }
+        }
+        for (auto &F : foundKernels) {
+                if (F->empty())
                     continue;
                 Function * promoted = createPromotedFunction (*F);
                 promoted->takeName (*F);
@@ -1977,32 +1952,29 @@ bool PromoteGlobals::runOnModule(Module& M)
                 }
         }
         updateKernels (M, promotedKernels);
+        eraseOldTileStaticDefs(&M);
 
         // Rename local variables per SPIR naming rule
-        Module::GlobalListType &globals = M.getGlobalList();
-        for (Module::global_iterator I = globals.begin(), E = globals.end();
+        for (Module::global_iterator I = M.global_begin(), E = M.global_end();
                 I != E; I++) {
             if (I->hasSection() &&
-                    I->getSection() == std::string(TILE_STATIC_NAME) &&
+                    I->getSection() == TILE_STATIC_NAME &&
                     I->getType()->getPointerAddressSpace() != 0) {
 
-                std::string oldName = I->getName().str();
                 // Prepend the name of the function which contains the user
-                std::set<std::string> userNames;
-                for (Value::user_iterator U = I->user_begin(), Ue = I->user_end();
-                    U != Ue; U ++) {
-                    Instruction *Ins = dyn_cast<Instruction>(*U);
-                    if (!Ins)
-                        continue;
-                    userNames.insert(Ins->getParent()->getParent()->getName().str());
+                StringRef funcName;
+                for (const auto &U : I->users()) {
+                    Instruction *Ins = dyn_cast<Instruction>(U);
+                    if (!Ins) continue;
+                    StringRef userName = Ins->getParent()->getParent()->getName();
+                    // A local memory variable belongs to only one kernel, per SPIR spec
+                    assert((funcName.empty() || funcName == userName)
+                      && "__local variable belongs to more than one kernel");
+                    funcName = userName;
                 }
-                // A local memory variable belongs to only one kernel, per SPIR spec
-                assert(userNames.size() < 2 &&
-                        "__local variable belongs to more than one kernel");
-                if (userNames.empty())
+                if (funcName.empty())
                     continue;
-                oldName = *(userNames.begin()) + "."+oldName;
-                I->setName(oldName);
+                I->setName(Twine(funcName, ".").concat(I->getName()));
                 // AMD SPIR stack takes only internal linkage
                 if (I->hasInitializer())
                     I->setLinkage(GlobalValue::InternalLinkage);
